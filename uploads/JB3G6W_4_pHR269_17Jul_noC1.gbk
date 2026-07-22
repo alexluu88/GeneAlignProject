@@ -1,0 +1,525 @@
+LOCUS       pHR269_17Jul_noC1      11359 bp    DNA     circular SYN 18-JUL-2026
+DEFINITION  pHR269_17Jul_noC1.
+ACCESSION   pHR269_17Jul_noC1
+VERSION     pHR269_17Jul_noC1
+KEYWORDS    .
+SOURCE      
+  ORGANISM  .
+            .
+COMMENT     Annotated with pLannotate v1.2.2
+FEATURES             Location/Qualifiers
+     CDS             complement(6389..7105)
+                     /note="pLannotate"
+                     /label="mEGFP"
+                     /database="fpbase"
+                     /identity="100.0"
+                     /match_length="100.0"
+                     /fragment="False"
+                     /other="CDS"
+                     /description=""
+     CDS             complement(4181..6322)
+                     /note="pLannotate"
+                     /label="AGGF1_HUMAN"
+                     /database="swissprot"
+                     /identity="100.0"
+                     /match_length="100.0"
+                     /fragment="False"
+                     /other="CDS"
+                     /description="Protein evidence at protein level: Swiss-Prot
+                     protein existence level 1. Promotes angiogenesis and the
+                     proliferation of endothelial cells. Able to bind to
+                     endothelial cells and promote cell proliferation,
+                     suggesting that it may act in an autocrine fashion. From
+                     Homo sapiens (Human)."
+     misc_feature    complement(3557..4145)
+                     /note="pLannotate"
+                     /label="WPRE"
+                     /database="snapgene"
+                     /identity="100.0"
+                     /match_length="100.0"
+                     /fragment="False"
+                     /other="misc_feature"
+                     /description="woodchuck hepatitis virus posttranscriptional
+                     regulatory element"
+     rep_origin      complement(2122..2550)
+                     /note="pLannotate"
+                     /label="f1 ori"
+                     /database="snapgene"
+                     /identity="100.0"
+                     /match_length="100.0"
+                     /fragment="False"
+                     /other="rep_origin"
+                     /description="f1 bacteriophage origin of replication; arrow
+                     indicates direction of (+) strand synthesis "
+     enhancer        complement(9579..9958)
+                     /note="pLannotate"
+                     /label="CMV enhancer"
+                     /database="snapgene"
+                     /identity="100.0"
+                     /match_length="100.0"
+                     /fragment="False"
+                     /other="enhancer"
+                     /description="human cytomegalovirus immediate early
+                     enhancer"
+     CDS             complement(1291..1665)
+                     /note="pLannotate"
+                     /label="BleoR"
+                     /database="snapgene"
+                     /identity="100.0"
+                     /match_length="100.0"
+                     /fragment="False"
+                     /other="CDS"
+                     /description="antibiotic-binding protein; Sh ble from
+                     Streptoalloteichus hindustanus; confers resistance to
+                     bleomycin, phleomycin, and Zeocin™"
+     CDS             10329..11189
+                     /note="pLannotate"
+                     /label="AmpR"
+                     /database="snapgene"
+                     /identity="99.8"
+                     /match_length="99.0"
+                     /fragment="False"
+                     /other="CDS"
+                     /description="β-lactamase; bla; confers resistance to
+                     ampicillin, carbenicillin, and related antibiotics"
+     misc_feature    complement(8283..8516)
+                     /note="pLannotate"
+                     /label="RRE"
+                     /database="snapgene"
+                     /identity="100.0"
+                     /match_length="100.0"
+                     /fragment="False"
+                     /other="misc_feature"
+                     /description="The Rev response element (RRE) of HIV-1
+                     allows for Rev-dependent mRNA export from the nucleus to
+                     the cytoplasm."
+     polyA_signal    complement(2596..2820)
+                     /note="pLannotate"
+                     /label="bGH poly(A) signal"
+                     /database="snapgene"
+                     /identity="100.0"
+                     /match_length="100.0"
+                     /fragment="False"
+                     /other="polyA_signal"
+                     /description="bovine growth hormone polyadenylation signal"
+     LTR             complement(9181..9361)
+                     /note="pLannotate"
+                     /label="5' LTR (truncated)"
+                     /database="snapgene"
+                     /identity="100.0"
+                     /match_length="100.0"
+                     /fragment="False"
+                     /other="LTR"
+                     /description="truncated 5' long terminal repeat (LTR) from
+                     HIV-1"
+     LTR             complement(2852..3032)
+                     /note="pLannotate"
+                     /label="5' LTR (truncated)"
+                     /database="snapgene"
+                     /identity="100.0"
+                     /match_length="100.0"
+                     /fragment="False"
+                     /other="LTR"
+                     /description="truncated 5' long terminal repeat (LTR) from
+                     HIV-1"
+     rep_origin      1..589
+                     /note="pLannotate"
+                     /label="ori"
+                     /database="snapgene"
+                     /identity="99.8"
+                     /match_length="99.0"
+                     /fragment="False"
+                     /other="rep_origin"
+                     /description="high-copy-number ColE1/pMB1/pBR322/pUC origin
+                     of replication "
+     promoter        complement(7128..7573)
+                     /note="pLannotate"
+                     /label="hSyn promoter"
+                     /database="snapgene"
+                     /identity="100.0"
+                     /match_length="99.6"
+                     /fragment="False"
+                     /other="promoter"
+                     /description="human synapsin I promoter; confers
+                     neuron-specific expression (Kügler et al., 2003)"
+     misc_feature    complement(9009..9134)
+                     /note="pLannotate"
+                     /label="HIV-1 Ψ"
+                     /database="snapgene"
+                     /identity="100.0"
+                     /match_length="100.0"
+                     /fragment="False"
+                     /other="misc_feature"
+                     /description="packaging signal of human immunodeficiency
+                     virus type 1"
+     polyA_signal    complement(1040..1161)
+                     /note="pLannotate"
+                     /label="SV40 poly(A) signal"
+                     /database="snapgene"
+                     /identity="100.0"
+                     /match_length="100.0"
+                     /fragment="False"
+                     /other="polyA_signal"
+                     /description="SV40 polyadenylation signal"
+     misc_feature    complement(7639..7756)
+                     /note="pLannotate"
+                     /label="cPPT/CTS"
+                     /database="snapgene"
+                     /identity="100.0"
+                     /match_length="100.0"
+                     /fragment="False"
+                     /other="misc_feature"
+                     /description="central polypurine tract and central
+                     termination sequence of HIV-1"
+     promoter        10224..10328
+                     /note="pLannotate"
+                     /label="AmpR promoter"
+                     /database="snapgene"
+                     /identity="100.0"
+                     /match_length="100.0"
+                     /fragment="False"
+                     /other="promoter"
+                     /description="bla"
+     promoter        complement(1779..2108)
+                     /note="pLannotate"
+                     /label="SV40 promoter"
+                     /database="snapgene"
+                     /identity="99.7"
+                     /match_length="99.0"
+                     /fragment="False"
+                     /other="promoter"
+                     /description="SV40 enhancer and early promoter"
+     CDS             complement(3039..3620)
+                     /note="pLannotate"
+                     /label="NEF_HV1H2 (fragment)"
+                     /database="swissprot"
+                     /identity="84.8"
+                     /match_length="79.0"
+                     /fragment="True"
+                     /other="CDS"
+                     /description="Protein evidence at protein level: Swiss-Prot
+                     protein existence level 1. Factor of infectivity and
+                     pathogenicity, required for optimal virus replication.
+                     Alters numerous pathways of T-lymphocyte function and
+                     down-regulates immunity surface molecules in order to evade
+                     host defense and increase viral infectivity. Alters the
+                     functionality of other immunity cells, like dendritic
+                     cells, monocytes/macrophages and NK cells. From Human
+                     immunodeficiency virus type 1 group M subtype B (isolate
+                     HXB2) (HIV-1)."
+     promoter        complement(9379..9578)
+                     /note="pLannotate"
+                     /label="CMV promoter"
+                     /database="snapgene"
+                     /identity="100.0"
+                     /match_length="98.0"
+                     /fragment="False"
+                     /other="promoter"
+                     /description="human cytomegalovirus (CMV) immediate early
+                     promoter"
+     promoter        complement(1684..1731)
+                     /note="pLannotate"
+                     /label="EM7 promoter"
+                     /database="snapgene"
+                     /identity="100.0"
+                     /match_length="100.0"
+                     /fragment="False"
+                     /other="promoter"
+                     /description="synthetic bacterial promoter&nbsp"
+     promoter        913..943
+                     /note="pLannotate"
+                     /label="lac promoter"
+                     /database="snapgene"
+                     /identity="100.0"
+                     /match_length="100.0"
+                     /fragment="False"
+                     /other="promoter"
+                     /description="promoter for the E. coli lac operon"
+     CDS             complement(8662..9025)
+                     /note="pLannotate"
+                     /label="HIV-1 gag (fragment)"
+                     /database="snapgene"
+                     /identity="97.3"
+                     /match_length="23.0"
+                     /fragment="True"
+                     /other="CDS"
+                     /description="gag protein from human immunodeficiency virus
+                     1; gag"
+     protein_bind    877..898
+                     /note="pLannotate"
+                     /label="CAP binding site"
+                     /database="snapgene"
+                     /identity="100.0"
+                     /match_length="100.0"
+                     /fragment="False"
+                     /other="protein_bind"
+                     /description="CAP binding activates transcription in the
+                     presence of cAMP. E. coli catabolite activator protein"
+     CDS             complement(7806..7906)
+                     /note="pLannotate"
+                     /label="Rev (fragment)"
+                     /database="snapgene"
+                     /identity="99.0"
+                     /match_length="28.0"
+                     /fragment="True"
+                     /other="CDS"
+                     /description="human immunodeficiency virus 1 (HIV-1) Rev
+                     protein; rev; enhances nuclear export of unspliced and
+                     incompletely spliced viral mRNAs"
+     protein_bind    947..969
+                     /note="pLannotate"
+                     /label="lac operator (fragment)"
+                     /database="snapgene"
+                     /identity="100.0"
+                     /match_length="92.0"
+                     /fragment="True"
+                     /other="protein_bind"
+                     /description="The lac repressor binds to the lac operator
+                     to inhibit transcription in E. coli. This inhibition can be
+                     relieved by adding lactose or
+                     isopropyl-β-D-thiogalactopyranoside (IPTG). lac repressor
+                     encoded by lacI"
+     CDS             complement(1156..1281)
+                     /note="pLannotate"
+                     /label="BLE_KLEPN (fragment)"
+                     /database="swissprot"
+                     /identity="97.6"
+                     /match_length="32.0"
+                     /fragment="True"
+                     /other="CDS"
+                     /description="Protein evidence at protein level: Swiss-Prot
+                     protein existence level 1. Binding protein with a strong
+                     affinity to the bleomycin family of antibiotics. Binds to
+                     CL990; an antimitotic-antibiotic compound. From Klebsiella
+                     pneumoniae."
+     CDS             772..864
+                     /note="pLannotate"
+                     /label="lacI (fragment)"
+                     /database="snapgene"
+                     /identity="100.0"
+                     /match_length="8.0"
+                     /fragment="True"
+                     /other="CDS"
+                     /description="lac repressor; lacI; The lac repressor binds
+                     to the lac operator to inhibit transcription in E. coli.
+                     This inhibition can be relieved by adding lactose or
+                     isopropyl-β-D-thiogalactopyranoside (IPTG)."
+     misc_feature    complement(4145..4169)
+                     /note="pLannotate"
+                     /label="MCS (fragment)"
+                     /database="snapgene"
+                     /identity="100.0"
+                     /match_length="23.0"
+                     /fragment="True"
+                     /other="misc_feature"
+                     /description="pBluescript multiple cloning site"
+     repeat_region   complement(749..760)
+                     /note="pLannotate"
+                     /label="AAV2 ITR (fragment)"
+                     /database="itrs"
+                     /identity="100.0"
+                     /match_length="8.0"
+                     /fragment="True"
+                     /other="repeat_region"
+                     /description="AAV2 ITR Flip"
+     promoter        complement(2571..2592)
+                     /note="pLannotate"
+                     /label="SV40 promoter (fragment)"
+                     /database="snapgene"
+                     /identity="100.0"
+                     /match_length="6.0"
+                     /fragment="True"
+                     /other="promoter"
+                     /description="SV40 enhancer and early promoter"
+ORIGIN
+        1 ttgagatcct ttttttctgc gcgtaatctg ctgcttgcaa acaaaaaaac caccgctacc
+       61 agcggtggtt tgtttgccgg atcaagagct accaactctt tttccgaagg taactggctt
+      121 cagcagagcg cagataccaa atactgttct tctagtgtag ccgtagttag gccaccactt
+      181 caagaactct gtagcaccgc ctacatacct cgctctgcta atcctgttac cagtggctgc
+      241 tgccagtggc gataagtcgt gtcttaccgg gttggactca agacgatagt taccggataa
+      301 ggcgcagcgg tcgggctgaa cggggggttc gtgcacacag cccagcttgg agcgaacgac
+      361 ctacaccgaa ctgagatacc tacagcgtga gctatgagaa agcgccacgc ttcccgaagg
+      421 gagaaaggcg gacaggtatc cggtaagcgg cagggtcgga acaggagagc gcacgaggga
+      481 gcttccaggg ggaaacgcct ggtatcttta tagtcctgtc gggtttcgcc acctctgact
+      541 tgagcgtcga tttttgtgat gctcgtcagg ggggcggagc ctatggaaaa acgccagcaa
+      601 cgcggccttt ttacggttcc tggccttttg ctggcctttt gctcacatgt tctttcctgc
+      661 gttatcccct gattctgtgg ataaccgtat taccgccttt gagtgagctg ataccgctcg
+      721 ccgcagccga acgaccgagc gcagcgagtc agtgagcgag gaagcggaag agcgcccaat
+      781 acgcaaaccg cctctccccg cgcgttggcc gattcattaa tgcagctggc acgacaggtt
+      841 tcccgactgg aaagcgggca gtgagcgcaa cgcaattaat gtgagttagc tcactcatta
+      901 ggcaccccag gctttacact ttatgcttcc ggctcgtatg ttgtgtggaa ttgtgagcgg
+      961 ataacaattt cacacaggaa acagctatga ccatgattac gccaagctct agctagaggt
+     1021 cgacggtata cagacatgat aagatacatt gatgagtttg gacaaaccac aactagaatg
+     1081 cagtgaaaaa aatgctttat ttgtgaaatt tgtgatgcta ttgctttatt tgtaaccatt
+     1141 ataagctgca ataaacaagt tggggtgggc gaagaactcc agcatgagat ccccgcgctg
+     1201 gaggatcatc cagccggcgt cccggaaaac gattccgaag cccaaccttt catagaaggc
+     1261 ggcggtggaa tcgaaatctc gtagcacgtg tcagtcctgc tcctcggcca cgaagtgcac
+     1321 gcagttgccg gccgggtcgc gcagggcgaa ctcccgcccc cacggctgct cgccgatctc
+     1381 ggtcatggcc ggcccggagg cgtcccggaa gttcgtggac acgacctccg accactcggc
+     1441 gtacagctcg tccaggccgc gcacccacac ccaggccagg gtgttgtccg gcaccacctg
+     1501 gtcctggacc gcgctgatga acagggtcac gtcgtcccgg accacaccgg cgaagtcgtc
+     1561 ctccacgaag tcccgggaga acccgagccg gtcggtccag aactcgaccg ctccggcgac
+     1621 gtcgcgcgcg gtgagcaccg gaacggcact ggtcaacttg gccatggttt agttcctcac
+     1681 cttgtcgtat tatactatgc cgatatacta tgccgatgat taattgtcaa cacgtgctga
+     1741 tcagatccga aaatggatat acaagctccc gggagctttt tgcaaaagcc taggcctcca
+     1801 aaaaagcctc ctcactactt ctggaatagc tcagaggcag aggcggcctc ggcctctgca
+     1861 taaataaaaa aaattagtca gccatggggc ggagaatggg cggaactggg cggagttagg
+     1921 ggcgggatgg gcggagttag gggcgggact atggttgctg actaattgag atgcatgctt
+     1981 tgcatacttc tgcctgctgg ggagcctggg gactttccac acctggttgc tgactaattg
+     2041 agatgcatgc tttgcatact tctgcctgct ggggagcctg gggactttcc acaccctaac
+     2101 tgacacacat tccacagaat taattcgcgt taaatttttg ttaaatcagc tcatttttta
+     2161 accaataggc cgaaatcggc aaaatccctt ataaatcaaa agaatagacc gagatagggt
+     2221 tgagtgttgt tccagtttgg aacaagagtc cactattaaa gaacgtggac tccaacgtca
+     2281 aagggcgaaa aaccgtctat cagggcgatg gcccactacg tgaaccatca ccctaatcaa
+     2341 gttttttggg gtcgaggtgc cgtaaagcac taaatcggaa ccctaaaggg agcccccgat
+     2401 ttagagcttg acggggaaag ccggcgaacg tggcgagaaa ggaagggaag aaagcgaaag
+     2461 gagcgggcgc tagggcgctg gcaagtgtag cggtcacgct gcgcgtaacc accacacccg
+     2521 ccgcgcttaa tgcgccgcta cagggcgcgt ggggataccc cctagagccc cagctggttc
+     2581 tttccgcctc agaagccata gagcccaccg catccccagc atgcctgcta ttgtcttccc
+     2641 aatcctcccc cttgctgtcc tgccccaccc caccccccag aatagaatga cacctactca
+     2701 gacaatgcga tgcaatttcc tcattttatt aggaaaggac agtgggagtg gcaccttcca
+     2761 gggtcaagga aggcacgggg gaggggcaaa caacagatgg ctggcaacta gaaggcacag
+     2821 tcgaggctga tcagcgggtt taaacgggcc ctgctagaga ttttccacac tgactaaaag
+     2881 ggtctgaggg atctctagtt accagagtca cacaacagac gggcacacac tacttgaagc
+     2941 actcaaggca agctttattg aggcttaagc agtgggttcc ctagttagcc agagagctcc
+     3001 caggctcaga tctggtctaa ccagagagac ccagtacagt ccggatgcag ctctcgggcc
+     3061 atgtgatgaa atgctaggcg gctgtcaaac ctccactcta atacttctct ctccgggtca
+     3121 tccatcccat gcaggctcac agggtgtaac aagcgggtgt tctctccttc attggcttct
+     3181 tctaccttct cttgctcaac tggtactagc ttgtagcacc atccaaaggt cagtggatat
+     3241 ctgatccctg gccctggtgt gtagttctgc caatcaggga agtagccttg tgtgtggtag
+     3301 atccacagat caaggatatc ttgtcttcgt tgggagtgaa ttagcccttc cagtcccccc
+     3361 ttttctttta aaaagtggct aagatctaca gctgccttgt aagtcattgg tcttaaaggt
+     3421 acctgaggtg tgactggaaa acccacctcc tcctcctctt gtgcttctag ccaggcacaa
+     3481 tcagcattgg tagctgctgt attgctactt gtgattgctc catgtttttc taggtctcga
+     3541 ggtcgacggt atcgatgcgg ggaggcggcc caaagggaga tccgactcgt ctgagggcga
+     3601 aggcgaagac gcggaagagg ccgcagagcc ggcagcaggc cgcgggaagg aaggtccgct
+     3661 ggattgaggg ccgaagggac gtagcagaag gacgtcccgc gcagaatcca ggtggcaaca
+     3721 caggcgagca gccaaggaaa ggacgatgat ttccccgaca acaccacgga attgtcagtg
+     3781 cccaacagcc gagcccctgt ccagcagcgg gcaaggcagg cggcgatgag ttccgccgtg
+     3841 gcaataggga gggggaaagc gaaagtcccg gaaaggagct gacaggtggt ggcaatgccc
+     3901 caaccagtgg gggttgcgtc agcaaacaca gtgcacacca cgccacgttg cctgacaacg
+     3961 ggccacaact cctcataaag agacagcaac caggatttat acaaggagga gaaaatgaaa
+     4021 gccatacggg aagcaatagc atgatacaaa ggcattaaag cagcgtatcc acatagcgta
+     4081 aaaggagcaa catagttaag aataccagtc aatctttcac aaattttgta atccagaggt
+     4141 tgattatcga taagcttgat atcgaattcg ctagcagtca ctctaaagtc ccttttaccc
+     4201 aaggcatggt ccctgggtca tctttttgag gcttagtttc tgggaagttt tcagtaaacc
+     4261 gctctcgtgc tttgtcccag ttttttttgt tcttgttttg gagaaggtga acatcttcaa
+     4321 atgaggatgg tttgcctgtc cccaagcctg catgtgttcg ccgaagctga agctggatcg
+     4381 gcgttttcat tcctccacca tccttcccca ggccctctcc tttcttccaa cccatcttct
+     4441 ccaacatctt ccgacctttg ttgctatcag taatttcaga atgaacagat gcaggagcat
+     4501 catctctttg gaaagttcct tcacttccaa cctgctccct acgttttcca gctctatctt
+     4561 tatattttgg attcttcaat gtcttttcat cttcgtattc tgtattctgt aaaccatatt
+     4621 ttactcgtat tttctttaat tcttttcttc tttccaactc tttttcctcc ttacttagtg
+     4681 ttggaccaac aaaagattca tctttcttat caaggcgaag gtgggctcta acctgccctg
+     4741 gttcacagcc atcacaggta tcactgccag gatgaatgtg aaaggataag acagtttctc
+     4801 caattttgac ttcatctcca tgctcaagta cgtaagggtc acatttagtt ttcggctgaa
+     4861 gaatctgttt tccattaaca attgtgccat tttgactgcc ttgatccaca aggacataac
+     4921 tttgtaagtc atggtcaaaa taaatttctg catgaaactt actgacacca acttcaggga
+     4981 ttcggagagt atgttccata tccttttctc ttccaattgt agcagggttt acagcagtaa
+     5041 tgataaagag tgatcctatc tgcaacacag gtgatctaat gacaattact ctaatacatg
+     5101 ggggccaaat tttgtcttca tcttcatcct cactatcttc tgcagttaca ttgccttcac
+     5161 tggtaatggc ttcgtcataa ctatcctcag tctgagagtc tgtaatttca ccttcctctg
+     5221 gttcactatc agtctccatg attttctcat ctttaaatga tgttgaatta gagatgtttt
+     5281 catgaagagg agactctata gtatttccac tagttggaac agtgactttg gggggactat
+     5341 ttttgtgatg aatgcctatt ttggccttct ttttcatatt tgcgaaattt tcttcctcat
+     5401 tgcagcttgt atgttcaaca ctgaaggctt tttgatcctc tgagttcaaa tccttttcct
+     5461 catttgttgc agaagaatct ggatcttttc ttttcttctt caatttttta tctttacttt
+     5521 gttttgtgct agaagtcgga taaggttgca aatctactcg agaatgaaac tgataacgac
+     5581 cactttccac atcacaatag tagtagatgc cggtgctggg gtcataatag agttgatttt
+     5641 cagaatcata atagaaacca gtgctgtggt caaaatacag tccagtattt tcatcataac
+     5701 taaatccagt ctgtgataca gccgcttctg ctgcagctct caaactttca gctaatgatg
+     5761 agccttctaa ggaggtatct tctgttgcta atgcagatgc tggctcctgt gaatttgagg
+     5821 caaaatggtc cacttgtcta tatttaacat tttctgttct atcggtacca gggtaagcat
+     5881 cattttctac ttgtaaatgg tctttagaat tcaaaataga agtttcgata gcttgatctt
+     5941 gttgatctga cagttcagtc actttatttg gaagactaac gtcattgtag tacgtctgat
+     6001 aaaaataatc tgagattgac caaggagcat ggttctctgt ttgtacttct acatcagact
+     6061 ttttattatc ttcatttctc ccacgttgga gtattttact gagttcttcc acctgcgtgc
+     6121 ggagctcctg gttgttgctt tctgcgttct ggtacagccg ttctgtgtga tgcagcagct
+     6181 tctcgatctc ccgcacctgc cgcttgcagc tccgcagttc acgttccaac ttctccacct
+     6241 tccgccttag ctgggccagc tcaggctcgg gggaggtggg cggcggcggc gaccgcggcg
+     6301 gggacggcgc ctccgaggcc atacctgcag gtgatccgcc gccacccgac ccacctccgc
+     6361 ccgagcctcc gccaccagag gtacctccct tgtacagctc gtccatgccg agagtgatcc
+     6421 cggcggcggt cacgaactcc agcaggacca tgtgatcgcg cttctcgttg gggtctttgc
+     6481 tcagcttgga ctgggtgctc aggtagtggt tgtcgggcag cagcacgggg ccgtcgccga
+     6541 tgggggtgtt ctgctggtag tggtcggcga gctgcacgct gccgtcctcg atgttgtggc
+     6601 ggatcttgaa gttcaccttg atgccgttct tctgcttgtc ggccatgata tagacgttgt
+     6661 ggctgttgta gttgtactcc agcttgtgcc ccaggatgtt gccgtcctcc ttgaagtcga
+     6721 tgcccttcag ctcgatgcgg ttcaccaggg tgtcgccctc gaacttcacc tcggcgcggg
+     6781 tcttgtagtt gccgtcgtcc ttgaagaaga tggtgcgctc ctggacgtag ccttcgggca
+     6841 tggcggactt gaagaagtcg tgctgcttca tgtggtcggg gtagcggctg aagcactgca
+     6901 cgccgtaggt cagggtggtc acgagggtgg gccagggcac gggcagcttg ccggtggtgc
+     6961 agatgaactt cagggtcagc ttgccgtagg tggcatcgcc ctcgccctcg ccggacacgc
+     7021 tgaacttgtg gccgtttacg tcgccgtcca gctcgaccag gatgggcacc accccggtga
+     7081 acagctcctc gcccttgctc accatggtgg cggctctcga cggatccgcg ctctcaggca
+     7141 cgacacgact cctccgctgc ccaccgcaga ctgaggcagc gctgagtcgc cggcgccgca
+     7201 gcgcagatgg tcgcgcccgt gcccccctat ctcgcgcctc gcgtggtgcg gtccggctgg
+     7261 gccggcggcg gcgcggacgc gaccaaggtg gccgggaagg ggagtttgcg ggggaccggc
+     7321 gagtgacgtc agcgcgcctt cagtgctgag gcggcggtgg cgcgcgccgc caggcggggg
+     7381 cgaaggcact gtccgcggtg ctgaagctgg cagtgcgcac gcgcctcgcc gcatcctgtt
+     7441 tcccctcccc ctctctgata ggggatgcgc aatttgggga atgggggttg ggtgcttgtc
+     7501 cagtgggtcg gggtcggtcg tcaggtaggc acccccaccc cgcctcatcc tggtcctaaa
+     7561 acccacttgc actcatacgc agggccctct gcagttaatt aaccaaactg gatctctgct
+     7621 gtccctgtaa taaacccgaa aattttgaat ttttgtaatt tgtttttgta attctttagt
+     7681 ttgtatgtct gttgctatta tgtctactat tctttcccct gcactgtacc ccccaatccc
+     7741 cccttttctt ttaaaattgt ggatgaatac tgccatttgt ctgcagaatt ggcgcacgca
+     7801 gtgccgatcc gttcactaat cgaatggatc tgtctctgtc tctctctcca ccttcttctt
+     7861 ctattccttc gggcctgtcg ggtcccctcg gggttgggag gtgggtctga aacgataatg
+     7921 gtgaatatcc ctgcctaact ctattcacta tagaaagtac agcaaaaact attcttaaac
+     7981 ctaccaagcc tcctactatc attatgaata attttatata ccacagccaa tttgttatgt
+     8041 taaaccaatt ccacaaactt gcccatttat ctaattccaa taattcttgt tcattctttt
+     8101 cttgctggtt ttgcgattct tcaattaagg agtgtattaa gcttgtgtaa ttgttaattt
+     8161 ctctgtccca ctccatccag gtcgtgtgat tccaaatctg ttccagagat ttattactcc
+     8221 aactagcatt ccaaggcaca gcagtggtgc aaatgagttt tccagagcaa ccccaaatcc
+     8281 ccaggagctg ttgatccttt aggtatcttt ccacagccag gattcttgcc tggagctgct
+     8341 tgatgcccca gactgtgagt tgcaacagat gctgttgcgc ctcaatagcc ctcagcaaat
+     8401 tgttctgctg ctgcactata ccagacaata attgtctggc ctgtaccgtc agcgtcattg
+     8461 acgctgcgcc catagtgctt cctgctgctc ccaagaaccc aaggaacaaa gctcctattc
+     8521 ccactgctct tttttctctc tgcaccactc ttctctttgc cttggtgggt gctactccta
+     8581 atggttcaat ttttactact ttatatttat ataattcact tctccaattg tccctcatat
+     8641 ctcctcctcc aggtctgaag atcagcggcc gcttgctgtg cggtggtctt acttttgttt
+     8701 tgctcttcct ctatcttgtc taaagcttcc ttggtgtctt ttatctctat cctttgatgc
+     8761 acacaataga gggttgctac tgtattatat aatgatctaa gttcttctga tcctgtctga
+     8821 agggatggtt gtagctgtcc cagtatttgt ctacagcctt ctgatgtttc taacaggcca
+     8881 ggattaactg cgaatcgttc tagctccctg cttgcccata ctatatgttt taatttatat
+     8941 tttttctttc cccctggcct taaccgaatt ttttcccatc gcgatctaat tctcccccgc
+     9001 ttaatactga cgctctcgca cccatctctc tccttctagc ctccgctagt caaaattttt
+     9061 ggcgtactca ccagtcgccg cccctcgcct cttgccgtgc gcgcttcagc aagccgagtc
+     9121 ctgcgtcgag agagctcctc tggtttccct ttcgctttca agtccctgtt cgggcgccac
+     9181 tgctagagat tttccacact gactaaaagg gtctgaggga tctctagtta ccagagtcac
+     9241 acaacagacg ggcacacact acttgaagca ctcaaggcaa gctttattga ggcttaagca
+     9301 gtgggttccc tagttagcca gagagctccc aggctcagat ctggtctaac cagagagacc
+     9361 cagtacaggc aaaacgcgct gcttatatag acctcccacc gtacacgcct accgcccatt
+     9421 tgcgtcaatg gggcggagtt gttacgacat tttggaaagt cccgttgatt ttggtgccaa
+     9481 aacaaactcc cattgacgtc aatggggtgg agacttggaa atccccgtga gtcaaaccgc
+     9541 tatccacgcc cattgatgta ctgccaaaac cgcatcacca tggtaatagc gatgactaat
+     9601 acgtagatgt actgccaagt aggaaagtcc cataaggtca tgtactgggc ataatgccag
+     9661 gcgggccatt taccgtcatt gacgtcaata gggggcgtac ttggcatatg atacacttga
+     9721 tgtactgcca agtgggcagt ttaccgtaaa tactccaccc attgacgtca atggaaagtc
+     9781 cctattggcg ttactatggg aacatacgtc attattgacg tcaatgggcg ggggtcgttg
+     9841 ggcggtcagc caggcgggcc atttaccgta agttatgtaa cgcggaactc catatatggg
+     9901 ctatgaacta atgaccccgt aattgattac tattaataac tagtcaataa tcaatgtcaa
+     9961 cgcgtatatc tggcccgtac atcgcgaagc agcgcaaaac gcctaaccct aagcagattc
+    10021 ttcatgcaat tgtcggtcaa gccttgcctt gttgtagctt aaattttgct cgcgcactac
+    10081 tcagcgacct ccaacacaca agcagggagc agatactggc ttaactatgc ggcatcagag
+    10141 cagattgtac tgagagtgca ccatagggga tcgggagatc tcccgatccg tcgacgtcag
+    10201 gtggcacttt tcggggaaat gtgcgcggaa cccctatttg tttatttttc taaatacatt
+    10261 caaatatgta tccgctcatg agacaataac cctgataaat gcttcaataa tattgaaaaa
+    10321 ggaagagtat gagtattcaa catttccgtg tcgcccttat tccctttttt gcggcatttt
+    10381 gccttcctgt ttttgctcac ccagaaacgc tggtgaaagt aaaagatgct gaagatcagt
+    10441 tgggtgcacg agtgggttac atcgaactgg atctcaacag cggtaagatc cttgagagtt
+    10501 ttcgccccga agaacgtttt ccaatgatga gcacttttaa agttctgcta tgtggcgcgg
+    10561 tattatcccg tattgacgcc gggcaagagc aactcggtcg ccgcatacac tattctcaga
+    10621 atgacttggt tgagtactca ccagtcacag aaaagcatct tacggatggc atgacagtaa
+    10681 gagaattatg cagtgctgcc ataaccatga gtgataacac tgcggccaac ttacttctga
+    10741 caacgatcgg aggaccgaag gagctaaccg cttttttgca caacatgggg gatcatgtaa
+    10801 ctcgccttga tcgttgggaa ccggagctga atgaagccat accaaacgac gagcgtgaca
+    10861 ccacgatgcc tgtagcaatg gcaacaacgt tgcgcaaact attaactggc gaactactta
+    10921 ctctagcttc ccggcaacaa ttaatagact ggatggaggc ggataaagtt gcaggaccac
+    10981 ttctgcgctc ggcccttccg gctggctggt ttattgctga taaatctgga gccggtgagc
+    11041 gtgggtctcg cggtatcatt gcagcactgg ggccagatgg taagccctcc cgtatcgtag
+    11101 ttatctacac gacggggagt caggcaacta tggatgaacg aaatagacag atcgctgaga
+    11161 taggtgcctc actgattaag cattggtaac tgtcagacca agtttactca tatatacttt
+    11221 agattgattt aaaacttcat ttttaattta aaaggatcta ggtgaagatc ctttttgata
+    11281 atctcatgac caaaatccct taacgtgagt tttcgttcca ctgagcgtca gaccccgtag
+    11341 aaaagatcaa aggatcttc
+//

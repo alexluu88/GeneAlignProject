@@ -1,17 +1,38 @@
 """Streamlit app for QC-checking Plasmidsaurus sequencing results.
 
-Upload Plasmidsaurus FASTA/GenBank files, align them locally against
-uploaded reference sequences, and optionally screen any unmatched regions
-against NCBI for human-derived contamination.
+Read Plasmidsaurus FASTA/GenBank files from a local folder, align them
+locally against reference sequences from another local folder, and
+optionally screen any unmatched regions against NCBI for human-derived
+contamination.
 """
 
 from __future__ import annotations
 
 import time
 
+import pandas as pd
 import streamlit as st
+import streamlit.components.v1 as components
 
 import analyzer
+
+
+def _sticky_expander(label: str, state_key: str):
+    """st.expander that stays open across reruns triggered by a widget
+    nested inside it.
+
+    st.expander's `expanded` argument is only an *initial* hint that gets
+    re-evaluated fresh on every rerun; without tracking it explicitly, any
+    nested widget (a toggle, multiselect, ...) triggering a rerun makes the
+    expander default back to closed and visibly slam shut mid-interaction.
+    Pair this with `_mark_expanded(state_key)` as that widget's `on_change`.
+    """
+    st.session_state.setdefault(state_key, False)
+    return st.expander(label, expanded=st.session_state[state_key])
+
+
+def _mark_expanded(state_key: str) -> None:
+    st.session_state[state_key] = True
 
 
 def _render_gene_identifications(identifications: list[analyzer.GeneIdentification]) -> None:
@@ -43,8 +64,9 @@ st.markdown(
 
 st.title("Plasmidsaurus Sequencing QC")
 st.caption(
-    "Upload Plasmidsaurus FASTA/GenBank results, align them against your reference "
-    "sequences, and flag any unmatched regions for NCBI human-gene screening."
+    "Point at local folders of Plasmidsaurus FASTA/GenBank results and reference "
+    "sequences, align them, and flag any unmatched regions for NCBI human-gene "
+    "screening."
 )
 
 # ---------------------------------------------------------------------------
@@ -71,10 +93,14 @@ with st.sidebar:
         "Gene of interest",
         value="AGGF1",
         help=(
-            "Only differences overlapping a gene/CDS feature whose annotation label "
-            "contains this name (from the reference or, failing that, the query) are "
-            "reported as mutations. Leave blank to report differences against any "
-            "annotated gene/CDS, or against the whole reference if none are annotated."
+            "With a reference folder: only differences overlapping a gene/CDS feature "
+            "whose annotation label contains this name (from the reference or, failing "
+            "that, the query) are reported as mutations. Leave blank to report "
+            "differences against any annotated gene/CDS, or against the whole reference "
+            "if none are annotated.\n\n"
+            "Without a reference folder: this gene's sequence is looked up on NCBI by "
+            "name and searched for directly in each query read (Reference-Free Gene "
+            "Search) -- requires an Entrez email below."
         ),
     )
 
@@ -87,37 +113,51 @@ with st.sidebar:
 # Main: upload + run
 # ---------------------------------------------------------------------------
 
-reference_files = st.file_uploader(
-    "Upload reference sequence(s) (known-good plasmid/gene)",
-    type=["fasta", "fa", "fna", "gb", "gbk", "genbank"],
-    accept_multiple_files=True,
+reference_folder = st.text_input(
+    "Reference sequence folder path (known-good plasmid/gene FASTA/GenBank files) — "
+    "optional if a Gene of interest is set in the sidebar",
 )
 
-uploaded_files = st.file_uploader(
-    "Upload Plasmidsaurus result files",
-    type=["fasta", "fa", "fna", "gb", "gbk", "genbank"],
-    accept_multiple_files=True,
+query_folder = st.text_input(
+    "Plasmidsaurus result folder path (query FASTA/GenBank files)",
 )
 
 run_clicked = st.button(
-    "Run analysis", type="primary", disabled=not (uploaded_files and reference_files)
+    "Run analysis",
+    type="primary",
+    disabled=not (query_folder and (reference_folder or gene_name_filter)),
 )
 
-if run_clicked:
+
+def _load_records_from_folder(folder_path: str, label: str) -> list[analyzer.SeqRecord]:
+    """Load all sequence records from a local folder, surfacing problems in the UI."""
+    try:
+        paths = analyzer.find_sequence_files(folder_path)
+    except ValueError as exc:
+        st.error(f"{label}: {exc}")
+        return []
+
+    if not paths:
+        st.warning(f"{label}: no FASTA/GenBank files found in {folder_path}")
+        return []
+
+    records = []
+    for path in paths:
+        try:
+            records.extend(analyzer.parse_records_from_path(path))
+        except ValueError as exc:
+            st.error(f"{path.name}: {exc}")
+    return records
+
+
+if run_clicked and reference_folder:
     progress_bar = st.progress(0.0, text="Starting analysis...")
 
-    references = []
-    for reference_file in reference_files:
-        try:
-            references.extend(
-                analyzer.parse_records_from_bytes(reference_file.getvalue(), reference_file.name)
-            )
-        except ValueError as exc:
-            st.error(f"{reference_file.name}: {exc}")
+    references = _load_records_from_folder(reference_folder, "Reference folder")
 
     if not references:
         progress_bar.empty()
-        st.error("No valid reference sequences uploaded.")
+        st.error("No valid reference sequences found.")
         st.stop()
 
     comparison_refs = analyzer.expand_with_gene_features(references)
@@ -132,18 +172,9 @@ if run_clicked:
 
     aligner = analyzer.build_aligner(mode="local")
 
-    # Parse every uploaded file up front so the total record count is known
+    # Load every query file up front so the total record count is known
     # before starting alignment -- needed to drive a determinate progress bar.
-    pending_queries = []  # list of query records across all uploaded files
-    for uploaded_file in uploaded_files:
-        try:
-            query_records = analyzer.parse_records_from_bytes(
-                uploaded_file.getvalue(), uploaded_file.name
-            )
-        except ValueError as exc:
-            st.error(f"{uploaded_file.name}: {exc}")
-            continue
-        pending_queries.extend(query_records)
+    pending_queries = _load_records_from_folder(query_folder, "Query folder")
 
     analysis_results = []  # list of (query_record, results, unmatched_fragments)
     total = len(pending_queries)
@@ -181,10 +212,67 @@ if run_clicked:
 
     st.session_state["analysis_results"] = analysis_results
     st.session_state["comparison_refs"] = comparison_refs
+    # A prior reference-free run's results shouldn't linger under a fresh
+    # reference-based run's output below.
+    st.session_state["reference_free_results"] = []
+
+elif run_clicked:
+    # No reference folder, but the button is only enabled here because a
+    # Gene of interest was set -- resolve its sequence from NCBI by name and
+    # search for it directly in the reads instead of aligning to a reference.
+    if not entrez_email:
+        st.error("Enter an Entrez email in the sidebar to look up the gene of interest on NCBI.")
+        st.stop()
+
+    pending_queries = _load_records_from_folder(query_folder, "Query folder")
+    if not pending_queries:
+        st.warning("No valid sequences to analyze.")
+        st.stop()
+
+    analyzer.configure_entrez(entrez_email, entrez_api_key or None)
+    try:
+        with st.spinner(f"Looking up '{gene_name_filter}' on NCBI..."):
+            gene_record = analyzer.fetch_gene_sequence_by_symbol(gene_name_filter)
+    except Exception as exc:  # network/NCBI errors surfaced to the user
+        st.error(f"Couldn't resolve '{gene_name_filter}' via NCBI: {exc}")
+        st.stop()
+
+    reference_free_results = analyzer.find_gene_in_queries(str(gene_record.seq), pending_queries)
+
+    st.session_state["reference_free_results"] = reference_free_results
+    st.session_state["reference_free_gene"] = gene_record
+    st.session_state["reference_free_gene_name"] = gene_name_filter
+    # A prior reference-based run's results shouldn't linger under a fresh
+    # reference-free run's output below.
+    st.session_state["analysis_results"] = []
 
 # ---------------------------------------------------------------------------
 # Display results
 # ---------------------------------------------------------------------------
+
+reference_free_results = st.session_state.get("reference_free_results", [])
+
+if reference_free_results:
+    st.divider()
+    st.header("Reference-Free Gene Search")
+    gene_record = st.session_state.get("reference_free_gene")
+    gene_name = st.session_state.get("reference_free_gene_name", gene_name_filter)
+    if gene_record is not None:
+        st.caption(
+            f"Searched for **{gene_name}** using NCBI sequence {gene_record.id} "
+            f"({len(gene_record.seq)} bp), forward and reverse complement."
+        )
+
+    for match in reference_free_results:
+        with st.container(border=True):
+            st.subheader(match.query_id)
+            if match.found:
+                st.success(
+                    f"Gene of Interest found in {match.query_id} at bp "
+                    f"{match.start}-{match.end} ({match.orientation})"
+                )
+            else:
+                st.error(f"Gene of Interest NOT found in {match.query_id}")
 
 analysis_results = st.session_state.get("analysis_results", [])
 comparison_refs = st.session_state.get("comparison_refs", [])
@@ -273,6 +361,17 @@ for query, results, unmatched_fragments in analysis_results:
 
     st.info("\n\n".join(summary_lines))
 
+    st.plotly_chart(
+        analyzer.build_alignment_figure(query, best, gene_scope=gene_scope, mutations=mutations),
+        use_container_width=True,
+        key=f"alignment_map_{query.id}_{best.reference_id}",
+        config={"scrollZoom": True, "displaylogo": False},
+    )
+    st.caption(
+        "Scroll or pinch on the map to zoom; drag to pan. Use the buttons above the "
+        "map to jump straight to the gene, mutations, or a detected motif."
+    )
+
     if mutations:
         shown = mutations[:20]
 
@@ -334,7 +433,8 @@ for query, results, unmatched_fragments in analysis_results:
             ]
         )
 
-    with st.expander("📄 Raw alignment text (best match)"):
+    raw_alignment_expanded_key = f"raw_alignment_expanded_{query.id}_{best.reference_id}"
+    with _sticky_expander("📄 Raw alignment text (best match)", raw_alignment_expanded_key):
         strand_note = (
             "Matched on the query's reverse complement strand (the insert is oriented "
             "opposite to how the query sequence is numbered — normal for circular "
@@ -343,7 +443,88 @@ for query, results, unmatched_fragments in analysis_results:
             else "Matched on the query as given (forward strand)."
         )
         st.caption(strand_note)
-        st.text(str(best.alignment))
+        only_mismatches = st.toggle(
+            "Only show regions with mismatches",
+            key=f"only_mismatches_{query.id}_{best.reference_id}",
+            on_change=_mark_expanded,
+            args=(raw_alignment_expanded_key,),
+        )
+        with st.container(height=500):
+            alignment_html = analyzer.format_alignment_html(best, only_mismatches=only_mismatches)
+            # st.markdown's markdown pass reinterprets indented-looking lines
+            # (the match-bar line's leading spaces) as a markdown code block
+            # and drops the inline styling, so this renders in its own
+            # unprocessed HTML frame instead. Sized generously off the line
+            # count -- the surrounding fixed-height container is what
+            # actually clips/scrolls it, so overestimating is harmless.
+            frame_height = max(120, alignment_html.count("\n") * 22 + 80)
+            components.html(alignment_html, height=frame_height, scrolling=False)
+
+    restriction_expanded_key = f"restriction_expanded_{query.id}_{best.reference_id}"
+    with _sticky_expander("🧬 Restriction Analysis & Virtual Gel", restriction_expanded_key):
+        st.caption(
+            f"Cut sites from a panel of {len(analyzer.COMMON_ENZYMES)} common commercial "
+            "restriction enzymes."
+        )
+
+        query_sites_df = analyzer.map_restriction_sites(
+            str(query.seq), circular=analyzer.is_circular_record(query)
+        )
+        st.markdown(f"**Query — {query.id}**")
+        if query_sites_df.empty:
+            st.info("None of the panel's enzymes cut this sequence.")
+        else:
+            st.dataframe(query_sites_df, use_container_width=True, hide_index=True)
+
+        ref_sites_df = pd.DataFrame()
+        if ref_record is not None:
+            ref_sites_df = analyzer.map_restriction_sites(
+                str(ref_record.seq), circular=analyzer.is_circular_record(ref_record)
+            )
+            st.markdown(f"**Reference — {ref_record.id}**")
+            if ref_sites_df.empty:
+                st.info("None of the panel's enzymes cut this sequence.")
+            else:
+                st.dataframe(ref_sites_df, use_container_width=True, hide_index=True)
+
+        found_enzymes = sorted(
+            set(query_sites_df["Enzyme"]) | set(ref_sites_df["Enzyme"])
+        ) if not query_sites_df.empty or not ref_sites_df.empty else []
+
+        digest_key_suffix = f"{query.id}_{best.reference_id}"
+        selected_enzymes = st.multiselect(
+            "Enzymes for virtual digest",
+            options=found_enzymes,
+            default=found_enzymes[:1] if found_enzymes else [],
+            help="Populated from the enzymes found above that actually cut the query and/or reference.",
+            key=f"digest_enzymes_{digest_key_suffix}",
+            on_change=_mark_expanded,
+            args=(restriction_expanded_key,),
+        )
+        ladder_name = st.selectbox(
+            "DNA ladder",
+            options=list(analyzer.DNA_LADDERS.keys()),
+            key=f"ladder_{digest_key_suffix}",
+            on_change=_mark_expanded,
+            args=(restriction_expanded_key,),
+        )
+
+        if not selected_enzymes:
+            st.info("Select at least one enzyme above to simulate a digest.")
+        else:
+            lanes = {ladder_name: analyzer.DNA_LADDERS[ladder_name]}
+            if ref_record is not None:
+                lanes[f"Reference — {ref_record.id}"] = analyzer.digest_fragments(
+                    str(ref_record.seq), selected_enzymes, circular=analyzer.is_circular_record(ref_record)
+                )
+            lanes[f"Query — {query.id}"] = analyzer.digest_fragments(
+                str(query.seq), selected_enzymes, circular=analyzer.is_circular_record(query)
+            )
+            st.plotly_chart(
+                analyzer.build_virtual_gel_figure(lanes),
+                use_container_width=True,
+                key=f"gel_{digest_key_suffix}",
+            )
 
     if unmatched_fragments:
         label = (
@@ -401,3 +582,67 @@ for query, results, unmatched_fragments in analysis_results:
                         _render_gene_identifications(identifications)
     elif status == "FLAGGED":
         st.info("Below threshold, but no unmatched flanking region met the minimum fragment length.")
+
+if analysis_results and comparison_refs:
+    st.divider()
+    st.header("Recommended Clones")
+    st.caption(
+        "For each reference, the first query (in upload/alphabetical order) that reached "
+        "a PASS status against it -- the tube to proceed with."
+    )
+
+    query_outcomes = []
+    for query, results, _ in analysis_results:
+        best = analyzer.pick_best_match(results, identity_threshold, coverage_threshold)
+        if best is None:
+            continue
+        status = analyzer.classify_match(best, identity_threshold, coverage_threshold)
+        query_outcomes.append(analyzer.QueryOutcome(
+            query_id=query.id,
+            reference_id=best.reference_id,
+            status=status,
+            identity_pct=best.identity_pct,
+        ))
+
+    recommended_clones_df = analyzer.recommend_clones(
+        query_outcomes, reference_ids=[r.id for r in comparison_refs]
+    )
+    st.dataframe(recommended_clones_df, use_container_width=True, hide_index=True)
+
+# The alignment map's x-axis is in bp, so zooming in past a few bp is
+# meaningless -- unbounded scroll/box zoom eventually lands on a fractional
+# sub-bp range (e.g. "169.236347429"), which reads as a rendering glitch.
+# Plotly has no min-zoom-span layout option, so this reaches into the parent
+# document (Streamlit's component iframe allows same-origin access) and
+# snaps any alignment map's xaxis.range back out to a minimum span on
+# relayout -- covers scroll-zoom, box-zoom, and the modebar zoom buttons.
+components.html(
+    """
+    <script>
+    (function () {
+        const MIN_SPAN_BP = 4;
+
+        function clampZoom(gd) {
+            if (gd.__zoomClampAttached) return;
+            gd.__zoomClampAttached = true;
+            gd.on("plotly_relayout", function (evt) {
+                const x0 = evt["xaxis.range[0]"];
+                const x1 = evt["xaxis.range[1]"];
+                if (x0 === undefined || x1 === undefined) return;
+                if (x1 - x0 >= MIN_SPAN_BP) return;
+                const mid = (x0 + x1) / 2;
+                window.parent.Plotly.relayout(gd, {
+                    "xaxis.range": [mid - MIN_SPAN_BP / 2, mid + MIN_SPAN_BP / 2],
+                });
+            });
+        }
+
+        const scan = () =>
+            window.parent.document.querySelectorAll(".js-plotly-plot").forEach(clampZoom);
+        const interval = setInterval(scan, 400);
+        setTimeout(() => clearInterval(interval), 20000);
+    })();
+    </script>
+    """,
+    height=0,
+)

@@ -7,22 +7,21 @@ human-derived contamination.
 
 from __future__ import annotations
 
-import io
 import re
 from dataclasses import dataclass
 from pathlib import Path
 
+import pandas as pd
+import plotly.graph_objects as go
 from Bio import Entrez, SeqIO
 from Bio.Align import Alignment, PairwiseAligner, substitution_matrices
 from Bio.Blast import NCBIWWW, NCBIXML
+from Bio.Restriction import Analysis, RestrictionBatch
 from Bio.Seq import Seq
 from Bio.SeqFeature import FeatureLocation, SeqFeature
 from Bio.SeqRecord import SeqRecord
 
-REFERENCE_GLOBS = {
-    "fasta": ("*.fasta", "*.fa", "*.fna"),
-    "genbank": ("*.gb", "*.gbk", "*.genbank"),
-}
+SEQUENCE_FILE_GLOBS = ("*.fasta", "*.fa", "*.fna", "*.gb", "*.gbk", "*.genbank")
 
 
 # --------------------------------------------------------------------------
@@ -96,37 +95,79 @@ class Truncation:
     missing_end_bp: int    # reference bases missing from the 3' end
 
 
+@dataclass
+class ReferenceFreeMatch:
+    """Result of exact-matching a gene's sequence against one query read,
+    with no reference plasmid/gene file involved."""
+    query_id: str
+    found: bool
+    start: int | None = None        # 1-based inclusive
+    end: int | None = None          # 1-based inclusive
+    orientation: str | None = None  # "Forward" or "Reverse"
+
+
+@dataclass
+class QueryOutcome:
+    """One query's headline result against its best-matching reference, as
+    already classified by pick_best_match/classify_match -- the input
+    recommend_clones aggregates across all queries in a run."""
+    query_id: str
+    reference_id: str
+    status: str  # "PASS", "GENE_FOUND", or "FLAGGED"
+    identity_pct: float
+
+
+@dataclass
+class AlignmentSegment:
+    """One contiguous block of a pairwise alignment, for visualization.
+
+    Coordinates are 0-based half-open. `ref_*`/`query_*` are in the
+    respective sequence's own coordinates (query is in whatever
+    orientation the alignment actually used); `col_*` is the shared
+    position within the alignment itself (gaps included), which is what
+    keeps the reference and query tracks of a plot lined up vertically
+    even where an indel has shifted one relative to the other.
+    """
+    kind: str  # "match", "mismatch", "insertion", or "deletion"
+    col_start: int
+    col_end: int
+    ref_start: int
+    ref_end: int
+    query_start: int
+    query_end: int
+    ref_seq: str
+    query_seq: str
+
+
 # --------------------------------------------------------------------------
 # File parsing
 # --------------------------------------------------------------------------
 
-def parse_records_from_bytes(data: bytes, filename: str) -> list[SeqRecord]:
-    """Parse an uploaded FASTA or GenBank file's raw bytes into SeqRecords."""
-    suffix = Path(filename).suffix.lower()
-    fmt = "genbank" if suffix in (".gb", ".gbk", ".genbank") else "fasta"
+def find_sequence_files(folder: str | Path) -> list[Path]:
+    """Return sorted paths to standard sequence files (FASTA/GenBank) in a folder.
 
-    text = data.decode("utf-8")
-    records = list(SeqIO.parse(io.StringIO(text), fmt))
-
-    if not records:
-        raise ValueError(f"No sequences found in {filename} (parsed as {fmt}).")
-    return records
-
-
-def load_reference_records(folder: str | Path) -> list[SeqRecord]:
-    """Load all FASTA/GenBank reference sequences from a folder."""
+    Raises ValueError if the path doesn't exist or isn't a directory. Returns
+    an empty list (not an error) if the directory has no matching files.
+    """
     folder = Path(folder)
     if not folder.is_dir():
-        raise ValueError(f"Reference folder not found: {folder}")
+        raise ValueError(f"Folder not found: {folder}")
 
-    records: list[SeqRecord] = []
-    for fmt, patterns in REFERENCE_GLOBS.items():
-        for pattern in patterns:
-            for path in sorted(folder.glob(pattern)):
-                records.extend(SeqIO.parse(str(path), fmt))
+    paths: set[Path] = set()
+    for pattern in SEQUENCE_FILE_GLOBS:
+        paths.update(folder.glob(pattern))
+    return sorted(paths)
 
+
+def parse_records_from_path(path: str | Path) -> list[SeqRecord]:
+    """Parse a FASTA or GenBank file on disk into SeqRecords."""
+    path = Path(path)
+    suffix = path.suffix.lower()
+    fmt = "genbank" if suffix in (".gb", ".gbk", ".genbank") else "fasta"
+
+    records = list(SeqIO.parse(str(path), fmt))
     if not records:
-        raise ValueError(f"No reference FASTA/GenBank files found in {folder}")
+        raise ValueError(f"No sequences found in {path.name} (parsed as {fmt}).")
     return records
 
 
@@ -330,6 +371,34 @@ def pick_best_match(
     )
 
 
+def recommend_clones(outcomes: list[QueryOutcome], reference_ids: list[str]) -> pd.DataFrame:
+    """Pick one "first-pass" recommended clone per reference: the first
+    query (in the given order -- queries are processed in sorted-filename
+    order, so this is simultaneously alphabetical and upload order) whose
+    best match against that reference reached PASS status.
+
+    `reference_ids` is the full set of references compared against in the
+    run, so a reference nobody happened to pass -- or that was never
+    anyone's best match at all -- still gets a row saying so, rather than
+    silently disappearing from the summary.
+    """
+    winners: dict[str, QueryOutcome] = {}
+    for outcome in outcomes:
+        if outcome.status != "PASS":
+            continue
+        winners.setdefault(outcome.reference_id, outcome)  # first PASS wins
+
+    rows = []
+    for reference_id in reference_ids:
+        winner = winners.get(reference_id)
+        rows.append({
+            "Reference": reference_id,
+            "Recommended Clone": winner.query_id if winner else "No passing clones found",
+            "Match Identity (%)": round(winner.identity_pct, 1) if winner else None,
+        })
+    return pd.DataFrame(rows, columns=["Reference", "Recommended Clone", "Match Identity (%)"])
+
+
 def find_mutations(result: AlignmentResult, max_report: int = 50) -> list[Mutation]:
     """List substitutions and indel blocks within the aligned region, in
     1-based reference coordinates. A contiguous run of deletion (or
@@ -381,6 +450,572 @@ def find_mutations(result: AlignmentResult, max_report: int = 50) -> list[Mutati
         i = j
 
     return mutations
+
+
+# --------------------------------------------------------------------------
+# Raw alignment text
+# --------------------------------------------------------------------------
+
+_MISMATCH_HTML_COLOR = "#d03b3b"  # matches the mismatch color in the alignment map
+_HIDDEN_RUN_HTML_COLOR = "#898781"  # matches the muted/unaligned color elsewhere
+
+
+def format_alignment_html(
+    result: AlignmentResult,
+    only_mismatches: bool = False,
+    flank_bp: int = 20,
+    wrap: int = 60,
+) -> str:
+    """Render a pairwise alignment as an HTML `<pre>` block: a Reference /
+    match-bar / Query triplet per `wrap`-column chunk, with mismatched bases
+    highlighted in red.
+
+    Rebuilt rather than using Bio.Align.Alignment.__str__ so it can collapse
+    long perfect-match runs -- printing every one of a multi-kb alignment's
+    mostly-identical columns makes the page unusably long. When
+    `only_mismatches` is set, any column more than `flank_bp` away from a
+    mismatch/insertion/deletion is replaced by a single collapsed-run line
+    instead of being printed.
+    """
+    aligned_query, aligned_ref = result.alignment[0], result.alignment[1]
+    num_cols = len(aligned_query)
+
+    if only_mismatches:
+        visible = bytearray(num_cols)
+        for c, (q_base, r_base) in enumerate(zip(aligned_query, aligned_ref)):
+            if q_base != r_base:
+                lo, hi = max(0, c - flank_bp), min(num_cols, c + flank_bp + 1)
+                visible[lo:hi] = b"\x01" * (hi - lo)
+    else:
+        visible = bytearray(b"\x01" * num_cols)
+
+    blocks: list[str] = []
+    ref_pos = query_pos = 0
+    col = 0
+    while col < num_cols:
+        run_visible = visible[col]
+        start = col
+        while col < num_cols and visible[col] == run_visible:
+            col += 1
+        q_run, r_run = aligned_query[start:col], aligned_ref[start:col]
+
+        if not run_visible:
+            # A hidden run is always pure match (any mismatch/indel column
+            # would have been marked visible), so its length is exactly the
+            # number of identical bp it represents on both sequences.
+            hidden_bp = col - start
+            blocks.append(
+                f'<div style="color:{_HIDDEN_RUN_HTML_COLOR};font-style:italic;'
+                f'text-align:center">... [{hidden_bp} identical bp hidden] ...</div>'
+            )
+            ref_pos += hidden_bp
+            query_pos += hidden_bp
+            continue
+
+        for i in range(0, len(q_run), wrap):
+            q_chunk, r_chunk = q_run[i:i + wrap], r_run[i:i + wrap]
+            r_chunk_len = sum(1 for b in r_chunk if b != "-")
+            q_chunk_len = sum(1 for b in q_chunk if b != "-")
+            match_bar = "".join("|" if a == b else " " for a, b in zip(q_chunk, r_chunk))
+            r_html, q_html = [], []
+            for q_base, r_base in zip(q_chunk, r_chunk):
+                if q_base != r_base and q_base != "-" and r_base != "-":
+                    r_html.append(f'<span style="color:{_MISMATCH_HTML_COLOR};font-weight:700">{r_base}</span>')
+                    q_html.append(f'<span style="color:{_MISMATCH_HTML_COLOR};font-weight:700">{q_base}</span>')
+                else:
+                    r_html.append(r_base)
+                    q_html.append(q_base)
+            # Label + position + separator width must match exactly across all
+            # three lines, or the match-bar's "|" columns drift out from under
+            # the bases they're marking.
+            blocks.append(
+                f"{'Ref':<6}{ref_pos + 1:>7} {''.join(r_html)} {ref_pos + r_chunk_len}\n"
+                f"{'':<6}{'':>7} {match_bar}\n"
+                f"{'Query':<6}{query_pos + 1:>7} {''.join(q_html)} {query_pos + q_chunk_len}"
+            )
+            ref_pos += r_chunk_len
+            query_pos += q_chunk_len
+
+    # A real <pre> tag gets intercepted and re-styled by Streamlit's markdown
+    # renderer (which drops this inline style and collapses whitespace), so
+    # whitespace preservation is done via a plain <div> instead.
+    style = "white-space:pre;overflow-x:auto;line-height:1.4;font-family:monospace"
+    return f'<div style="{style}">' + "\n\n".join(blocks) + "</div>"
+
+
+# --------------------------------------------------------------------------
+# Visual alignment map (interactive Plotly figure)
+# --------------------------------------------------------------------------
+
+def build_alignment_segments(result: AlignmentResult) -> list[AlignmentSegment]:
+    """Run-length encode a pairwise alignment into match/mismatch/insertion/
+    deletion blocks, for visualization.
+
+    Match and indel runs are merged into single contiguous segments (like
+    find_mutations merges indel runs); mismatches are kept one column per
+    segment so each SNP stays individually addressable on hover, matching
+    how find_mutations reports substitutions individually.
+    """
+    alignment = result.alignment
+    aligned_query, aligned_ref = alignment[0], alignment[1]
+
+    segments: list[AlignmentSegment] = []
+    ref_pos = 0
+    query_pos = 0
+
+    run_kind: str | None = None
+    run_col_start = run_ref_start = run_query_start = 0
+    run_ref_bases: list[str] = []
+    run_query_bases: list[str] = []
+
+    def close_run(end_col: int) -> None:
+        segments.append(AlignmentSegment(
+            kind=run_kind, col_start=run_col_start, col_end=end_col,
+            ref_start=run_ref_start, ref_end=ref_pos,
+            query_start=run_query_start, query_end=query_pos,
+            ref_seq="".join(run_ref_bases), query_seq="".join(run_query_bases),
+        ))
+
+    for col, (q_base, r_base) in enumerate(zip(aligned_query, aligned_ref)):
+        if q_base == r_base:
+            kind = "match"
+        elif r_base == "-":
+            kind = "insertion"
+        elif q_base == "-":
+            kind = "deletion"
+        else:
+            kind = "mismatch"
+
+        if kind == "mismatch":
+            # Never merged with neighbors, even other mismatches -- each SNP
+            # is its own event, mirroring find_mutations.
+            if run_kind is not None:
+                close_run(col)
+                run_kind = None
+            ref_before, query_before = ref_pos, query_pos
+            if r_base != "-":
+                ref_pos += 1
+            if q_base != "-":
+                query_pos += 1
+            segments.append(AlignmentSegment(
+                kind="mismatch", col_start=col, col_end=col + 1,
+                ref_start=ref_before, ref_end=ref_pos,
+                query_start=query_before, query_end=query_pos,
+                ref_seq=r_base, query_seq=q_base,
+            ))
+            continue
+
+        if kind != run_kind:
+            if run_kind is not None:
+                close_run(col)
+            run_kind = kind
+            run_col_start, run_ref_start, run_query_start = col, ref_pos, query_pos
+            run_ref_bases, run_query_bases = [], []
+
+        if r_base != "-":
+            ref_pos += 1
+        if q_base != "-":
+            query_pos += 1
+        run_ref_bases.append(r_base)
+        run_query_bases.append(q_base)
+
+    if run_kind is not None:
+        close_run(len(aligned_query))
+
+    return segments
+
+
+_SEGMENT_COLORS = {
+    "match": "#0ca30c",       # status: good
+    "mismatch": "#d03b3b",    # status: critical -- SNP
+    "insertion": "#fab219",   # status: warning -- extra query bases
+    "deletion": "#ec835a",    # status: serious -- query bases missing
+    "unaligned": "#c3c2b7",   # muted -- outside the alignment entirely
+}
+_SEGMENT_LABELS = {
+    "match": "Match",
+    "mismatch": "SNP / mismatch",
+    "insertion": "Insertion",
+    "deletion": "Deletion",
+    "unaligned": "Not aligned",
+}
+
+COMMON_MOTIFS = {
+    "EGFP": {"seq": "ATGGTGAGCAAGGGCGAGGAGCTGTTCACCGGGGTGGTGCCCATC", "color": "#2196F3"},
+    "mCherry": {"seq": "ATGGTGAGCAAGGGCGAGGAGGATAACATGGCCATCATCAAGGAG", "color": "#F44336"},
+    "FLAG-tag": {"seq": "GATTACAAGGATGACGACGATAAG", "color": "#9C27B0"},
+    "HA-tag": {"seq": "TACCCATACGATGTTCCAGATTACGCT", "color": "#E91E63"},
+    "His6-tag": {"seq": "CATCACCATCACCATCAC", "color": "#3F51B5"},
+    "CMV Promoter": {"seq": "CGTTACATAACTTACGGTAAATGGCC", "color": "#FF9800"},
+    "U6 Promoter": {"seq": "GAGGGCCTATTTCCCATGATTC", "color": "#FFC107"},
+    "T7 Promoter": {"seq": "TAATACGACTCACTATAGGG", "color": "#795548"},
+}
+
+
+@dataclass
+class MotifHit:
+    """One exact motif match against a (oriented, gap-free) query sequence.
+
+    `query_start`/`query_end` are 0-based half-open positions in the same
+    oriented-query coordinate space as AlignmentSegment.query_*, so they can
+    be projected onto the alignment map without any extra reorientation.
+    """
+    name: str
+    color: str
+    query_start: int
+    query_end: int
+    strand: str  # "+" (motif as given) or "-" (motif's reverse complement)
+    matched_seq: str
+
+
+def find_motifs(
+    sequence: str, motifs: dict[str, dict[str, str]] = COMMON_MOTIFS
+) -> list[MotifHit]:
+    """Scan `sequence` for exact matches to each motif, on both strands.
+
+    `sequence` must already be in the orientation whose coordinates the
+    caller wants back (e.g. an oriented, sanitized query). Overlapping hits
+    are kept (motifs can legitimately nest or abut); hits from different
+    motif names that land on the exact same span are merged into a single
+    combined hit instead of being drawn as indistinguishable stacked
+    rectangles -- e.g. EGFP and mCherry above share a common N-terminal
+    sequence, so a match there is genuinely ambiguous between the two.
+    """
+    seq = _sanitize_sequence(sequence).upper()
+    raw_hits: list[MotifHit] = []
+    for name, info in motifs.items():
+        motif_seq = _sanitize_sequence(info["seq"]).upper()
+        if not motif_seq:
+            continue
+        color = info["color"]
+        rc_motif = str(Seq(motif_seq).reverse_complement())
+        for strand, pattern in (("+", motif_seq), ("-", rc_motif)):
+            start = 0
+            while True:
+                idx = seq.find(pattern, start)
+                if idx == -1:
+                    break
+                raw_hits.append(MotifHit(
+                    name=name, color=color,
+                    query_start=idx, query_end=idx + len(pattern),
+                    strand=strand, matched_seq=pattern,
+                ))
+                start = idx + 1  # allow overlapping hits of other motifs/strands
+
+    grouped: dict[tuple[int, int, str], list[MotifHit]] = {}
+    for hit in raw_hits:
+        grouped.setdefault((hit.query_start, hit.query_end, hit.strand), []).append(hit)
+
+    merged: list[MotifHit] = []
+    for (start, end, strand), group in grouped.items():
+        if len(group) == 1:
+            merged.append(group[0])
+            continue
+        names = " / ".join(h.name for h in group)
+        merged.append(MotifHit(
+            name=f"{names} (ambiguous -- identical sequence)",
+            color=group[0].color,
+            query_start=start, query_end=end, strand=strand,
+            matched_seq=group[0].matched_seq,
+        ))
+
+    merged.sort(key=lambda h: h.query_start)
+    return merged
+
+
+def _make_axis_col_mapper(
+    segments: list[AlignmentSegment],
+    axis: str,  # "query" or "ref"
+    margin_left: int,
+    missing_start: int,
+    missing_end: int,
+    align_start: int,
+    align_end: int,
+    num_cols: int,
+    axis_len: int,
+):
+    """Build a function mapping a position on one axis (query or reference,
+    in the same coordinate space as the matching AlignmentSegment.*_start/
+    *_end fields) to its alignment-map column.
+
+    A deletion consumes zero query length and an insertion consumes zero
+    reference length, so each axis only has positions to map from within
+    the segment kinds that actually advance along it -- within those, the
+    axis and column both advance together one-for-one, so the mapping is a
+    simple per-segment offset.
+    """
+    consuming_kinds = ("match", "mismatch", "insertion") if axis == "query" else ("match", "mismatch", "deletion")
+    start_attr, end_attr = f"{axis}_start", f"{axis}_end"
+    axis_segments = [s for s in segments if s.kind in consuming_kinds]
+
+    def mapper(pos: int) -> int:
+        if pos <= 0:
+            return margin_left - missing_start
+        if pos >= axis_len:
+            return margin_left + num_cols + missing_end
+        if pos < align_start:
+            return (margin_left - missing_start) + pos
+        if pos >= align_end:
+            return margin_left + num_cols + (pos - align_end)
+        for seg in axis_segments:
+            seg_start, seg_end = getattr(seg, start_attr), getattr(seg, end_attr)
+            if seg_start <= pos < seg_end:
+                return margin_left + seg.col_start + (pos - seg_start)
+        # Falls between two segments (e.g. right at an indel on this axis)
+        # -- no base on this axis actually lives here, so snap to the
+        # nearest segment boundary.
+        for seg in axis_segments:
+            if pos <= getattr(seg, start_attr):
+                return margin_left + seg.col_start
+        return margin_left + num_cols
+
+    return mapper
+
+
+def build_alignment_figure(
+    query: SeqRecord,
+    result: AlignmentResult,
+    max_marked_events: int = 500,
+    gene_scope: GeneScope | None = None,
+    mutations: list[Mutation] | None = None,
+) -> go.Figure:
+    """Build an interactive two-track Plotly figure for one query-vs-reference
+    alignment: reference on top, query on the bottom, colored blocks for
+    matches, and clearly flagged mismatches/insertions/deletions.
+
+    The shared x-axis is alignment-column position rather than raw sequence
+    position, so reference and query bases that align to each other stay
+    vertically lined up even where an indel has shifted one sequence
+    relative to the other. Hovering a block still surfaces true
+    reference/query coordinates and, for a mismatch or indel, the specific
+    bases involved.
+
+    `gene_scope` and `mutations` (both optional, and best passed already
+    scoped to that gene) drive one-click "zoom to" buttons on the figure
+    itself -- precise region jumps are what users actually want when
+    inspecting a specific gene, which a generic drag-handle rangeslider is
+    fiddly for on a long, mostly-irrelevant plasmid backbone.
+    """
+    segments = build_alignment_segments(result)
+    oriented_query = _oriented_query(query, result)
+    query_len = len(_sanitize_sequence(str(oriented_query.seq)))
+
+    ref_blocks = result.alignment.aligned[1]
+    q_blocks = result.alignment.aligned[0]
+    ref_align_start = int(ref_blocks[0][0]) if len(ref_blocks) else 0
+    ref_align_end = int(ref_blocks[-1][1]) if len(ref_blocks) else 0
+    q_align_start = int(q_blocks[0][0]) if len(q_blocks) else 0
+    q_align_end = int(q_blocks[-1][1]) if len(q_blocks) else 0
+
+    missing_ref_start = ref_align_start
+    missing_ref_end = result.reference_length - ref_align_end
+    missing_query_start = q_align_start
+    missing_query_end = query_len - q_align_end
+
+    # Flanking regions outside the alignment are right-justified against the
+    # alignment's start (and left-justified against its end), so each
+    # track's own flank touches the shared column block even though the two
+    # tracks' flank lengths generally differ (they aren't the same sequence).
+    margin_left = max(missing_ref_start, missing_query_start)
+    num_cols = segments[-1].col_end if segments else 0
+
+    query_col = _make_axis_col_mapper(
+        segments, "query", margin_left, missing_query_start, missing_query_end,
+        q_align_start, q_align_end, num_cols, query_len,
+    )
+    ref_col = _make_axis_col_mapper(
+        segments, "ref", margin_left, missing_ref_start, missing_ref_end,
+        ref_align_start, ref_align_end, num_cols, result.reference_length,
+    )
+    motif_hits = find_motifs(str(oriented_query.seq))
+
+    # Cap the number of individually-drawn mismatch/indel events so a very
+    # heavily-mutated, large sequence doesn't produce tens of thousands of
+    # bar marks; long match runs are unaffected since they're already
+    # merged into single segments regardless of length.
+    event_segments = [s for s in segments if s.kind != "match"]
+    truncated_event_count = max(0, len(event_segments) - max_marked_events)
+    if truncated_event_count:
+        keep = {id(s) for s in event_segments[:max_marked_events]}
+        segments = [s for s in segments if s.kind == "match" or id(s) in keep]
+
+    by_kind: dict[str, dict[str, list]] = {
+        kind: {"x": [], "base": [], "y": [], "customdata": []} for kind in _SEGMENT_COLORS
+    }
+
+    def add_bar(kind: str, x0: int, x1: int, row: str, hover: str) -> None:
+        d = by_kind[kind]
+        d["x"].append(x1 - x0)
+        d["base"].append(x0)
+        d["y"].append(row)
+        d["customdata"].append(hover)
+
+    if missing_ref_start > 0:
+        add_bar(
+            "unaligned", margin_left - missing_ref_start, margin_left, "Reference",
+            f"Ref 1-{missing_ref_start} bp, not covered",
+        )
+    if missing_query_start > 0:
+        add_bar(
+            "unaligned", margin_left - missing_query_start, margin_left, "Query",
+            f"Query 1-{missing_query_start} bp, unaligned",
+        )
+
+    for seg in segments:
+        x0, x1 = margin_left + seg.col_start, margin_left + seg.col_end
+        if seg.kind == "mismatch":
+            hover = f"SNP @{seg.ref_start + 1}: {seg.ref_seq}→{seg.query_seq}"
+            add_bar("mismatch", x0, x1, "Reference", hover)
+            add_bar("mismatch", x0, x1, "Query", hover)
+        elif seg.kind == "insertion":
+            hover = f"+{len(seg.query_seq)} bp insertion @{seg.ref_start}"
+            add_bar("insertion", x0, x1, "Query", hover)
+        elif seg.kind == "deletion":
+            hover = f"-{seg.ref_end - seg.ref_start} bp deletion @{seg.ref_start + 1}-{seg.ref_end}"
+            add_bar("deletion", x0, x1, "Reference", hover)
+        else:  # match
+            length = seg.ref_end - seg.ref_start
+            hover = f"{length} bp match @{seg.ref_start + 1}-{seg.ref_end}"
+            add_bar("match", x0, x1, "Reference", hover)
+            add_bar("match", x0, x1, "Query", hover)
+
+    if missing_ref_end > 0:
+        add_bar(
+            "unaligned", margin_left + num_cols, margin_left + num_cols + missing_ref_end, "Reference",
+            f"Ref {result.reference_length - missing_ref_end + 1}-{result.reference_length} bp, not covered",
+        )
+    if missing_query_end > 0:
+        add_bar(
+            "unaligned", margin_left + num_cols, margin_left + num_cols + missing_query_end, "Query",
+            f"Query {query_len - missing_query_end + 1}-{query_len} bp, unaligned",
+        )
+
+    fig = go.Figure()
+    for kind, d in by_kind.items():
+        if not d["x"]:
+            continue
+        fig.add_trace(go.Bar(
+            name=_SEGMENT_LABELS[kind],
+            x=d["x"],
+            base=d["base"],
+            y=d["y"],
+            orientation="h",
+            width=0.38,
+            marker_color=_SEGMENT_COLORS[kind],
+            marker_line_color="#fcfcfb",
+            marker_line_width=0.5,
+            customdata=d["customdata"],
+            hovertemplate="%{customdata}<extra></extra>",
+        ))
+
+    motif_col_ranges: list[tuple[str, int, int]] = []
+    if motif_hits:
+        motif_x, motif_base, motif_color, motif_hover = [], [], [], []
+        for hit in motif_hits:
+            col0, col1 = query_col(hit.query_start), query_col(hit.query_end)
+            if col1 <= col0:
+                continue
+            motif_x.append(col1 - col0)
+            motif_base.append(col0)
+            motif_color.append(hit.color)
+            motif_hover.append(f"{hit.name} @{hit.query_start + 1}-{hit.query_end} ({hit.strand})")
+            motif_col_ranges.append((hit.name, col0, col1))
+        if motif_x:
+            # Drawn after (so visually on top of) the match/mismatch/indel
+            # traces, semi-transparent so the underlying call is still
+            # visible through the motif highlight.
+            fig.add_trace(go.Bar(
+                name="Motif match",
+                x=motif_x,
+                base=motif_base,
+                y=["Query"] * len(motif_x),
+                orientation="h",
+                width=0.38,
+                marker_color=motif_color,
+                opacity=0.55,
+                marker_line_color="#0b0b0b",
+                marker_line_width=0.5,
+                customdata=motif_hover,
+                hovertemplate="%{customdata}<extra></extra>",
+            ))
+
+    # One-click "zoom to" buttons: a drag-handle rangeslider is fiddly to
+    # aim precisely at a small gene inside a long backbone, but the app
+    # already knows exactly where the gene, its mutations, and any motif
+    # hits are -- so jumping straight there is one relayout call away.
+    full_x0 = 0
+    full_x1 = margin_left + num_cols + max(missing_ref_end, missing_query_end)
+
+    def _padded(x0: int, x1: int) -> tuple[float, float]:
+        pad = max(2.0, (x1 - x0) * 0.08)
+        return (max(full_x0, x0 - pad), min(full_x1, x1 + pad))
+
+    zoom_regions: list[tuple[str, float, float]] = [("Full view", full_x0, full_x1)]
+
+    if gene_scope and gene_scope.intervals:
+        g0 = min(iv[0] for iv in gene_scope.intervals)
+        g1 = max(iv[1] for iv in gene_scope.intervals)
+        zoom_regions.append(("Gene of interest", *_padded(ref_col(g0), ref_col(g1))))
+
+    if mutations:
+        spans = [_mutation_ref_span(m) for m in mutations]
+        m0 = min(s[0] for s in spans)
+        m1 = max(s[1] for s in spans)
+        zoom_regions.append(("Mutations", *_padded(ref_col(m0), ref_col(m1))))
+
+    motif_button_counts: dict[str, int] = {}
+    for name, col0, col1 in motif_col_ranges:
+        label = name.split(" (")[0]  # drop the "(ambiguous -- ...)" suffix for the button
+        motif_button_counts[label] = motif_button_counts.get(label, 0) + 1
+        button_label = label if motif_button_counts[label] == 1 else f"{label} #{motif_button_counts[label]}"
+        zoom_regions.append((button_label, *_padded(col0, col1)))
+
+    fig.update_layout(
+        barmode="overlay",
+        height=190,
+        margin=dict(l=10, r=10, t=55, b=10),
+        legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="left", x=0),
+        plot_bgcolor="#fcfcfb",
+        paper_bgcolor="#fcfcfb",
+        font=dict(color="#0b0b0b", family="system-ui, -apple-system, 'Segoe UI', sans-serif"),
+        updatemenus=[dict(
+            type="buttons",
+            direction="right",
+            showactive=False,
+            x=1, xanchor="right",
+            y=1.32, yanchor="top",
+            pad=dict(l=4, r=4, t=2, b=2),
+            font=dict(size=11),
+            buttons=[
+                dict(label=label, method="relayout", args=[{"xaxis.range": [x0, x1]}])
+                for label, x0, x1 in zoom_regions
+            ],
+        )],
+    )
+    fig.update_xaxes(
+        title_text="Alignment position (bp)",
+        showgrid=False,
+        zeroline=False,
+        range=[full_x0, full_x1],
+        minallowed=full_x0,
+        maxallowed=full_x1,
+        color="#898781",
+    )
+    fig.update_yaxes(
+        categoryorder="array",
+        categoryarray=["Query", "Reference"],
+        showgrid=False,
+        zeroline=False,
+        color="#0b0b0b",
+        fixedrange=True,
+    )
+    if truncated_event_count:
+        fig.add_annotation(
+            text=f"({truncated_event_count} additional mismatch/indel event(s) not drawn on the map above)",
+            xref="paper", yref="paper", x=0, y=-0.32, showarrow=False, align="left",
+            font=dict(size=11, color="#898781"),
+        )
+    return fig
 
 
 def _feature_label(feature) -> str:
@@ -677,6 +1312,84 @@ def fetch_gene_annotation(accession: str) -> str:
     return f"{record.description} | genes: {genes}"
 
 
+def fetch_gene_sequence_by_symbol(gene_symbol: str, organism: str = "Homo sapiens") -> SeqRecord:
+    """Resolve a gene symbol/name (e.g. "AGGF1") to an actual nucleotide
+    sequence via Entrez, for reference-free searching when no local
+    reference file is available to supply one.
+
+    Prefers a RefSeq mRNA record (spliced, exon-only) over the gene's full
+    genomic locus -- a cloned insert carries the coding sequence, not the
+    introns, so a genomic hit would essentially never exact-match a read.
+    Falls back to any nucleotide hit for the symbol if no mRNA record is
+    found. Raises ValueError if nothing comes back at all.
+    """
+    if not Entrez.email:
+        raise RuntimeError("Call configure_entrez(email) before querying NCBI.")
+
+    def _search(term: str) -> list[str]:
+        handle = Entrez.esearch(db="nucleotide", term=term, retmax=1, sort="relevance")
+        try:
+            result = Entrez.read(handle)
+        finally:
+            handle.close()
+        return result.get("IdList", [])
+
+    ids = _search(
+        f'{gene_symbol}[Gene Name] AND {organism}[Organism] AND biomol_mrna[PROP] AND refseq[Filter]'
+    )
+    if not ids:
+        ids = _search(f'{gene_symbol}[Gene Name] AND {organism}[Organism]')
+    if not ids:
+        raise ValueError(f"No NCBI nucleotide record found for gene '{gene_symbol}' ({organism}).")
+
+    fetch_handle = Entrez.efetch(db="nucleotide", id=ids[0], rettype="fasta", retmode="text")
+    try:
+        return SeqIO.read(fetch_handle, "fasta")
+    finally:
+        fetch_handle.close()
+
+
+# --------------------------------------------------------------------------
+# Reference-free gene search
+#
+# For when no local reference plasmid/gene file is available: the gene's
+# sequence is resolved from NCBI by symbol (fetch_gene_sequence_by_symbol
+# above) instead, and matched directly against each query read by exact
+# string search rather than alignment.
+# --------------------------------------------------------------------------
+
+def find_gene_in_queries(gene_sequence: str, queries: list[SeqRecord]) -> list[ReferenceFreeMatch]:
+    """Exact-match `gene_sequence` against each query, checking both the
+    forward strand and the reverse complement -- a cloned insert can land in
+    either orientation relative to how the plasmid happens to be numbered,
+    so checking only the forward strand would miss a real match half the
+    time. Returns one ReferenceFreeMatch per query, in the same order.
+    """
+    probe = _sanitize_sequence(gene_sequence)
+    if not probe:
+        raise ValueError("Gene of interest sequence is empty.")
+    revcomp_probe = str(Seq(probe).reverse_complement())
+
+    matches: list[ReferenceFreeMatch] = []
+    for query in queries:
+        seq = _sanitize_sequence(str(query.seq))
+
+        idx = seq.find(probe)
+        orientation = "Forward"
+        if idx == -1:
+            idx = seq.find(revcomp_probe)
+            orientation = "Reverse"
+
+        if idx == -1:
+            matches.append(ReferenceFreeMatch(query_id=query.id, found=False))
+        else:
+            matches.append(ReferenceFreeMatch(
+                query_id=query.id, found=True,
+                start=idx + 1, end=idx + len(probe), orientation=orientation,
+            ))
+    return matches
+
+
 def _lookup_gene_for_accession(accession: str) -> tuple[str | None, str | None]:
     """Resolve a nucleotide accession to its linked NCBI Gene symbol/name.
 
@@ -774,3 +1487,167 @@ def identify_gene_via_ncbi(
             break
 
     return identifications
+
+
+# --------------------------------------------------------------------------
+# Restriction analysis & virtual gel
+# --------------------------------------------------------------------------
+
+# A curated panel of widely-stocked commercial cloning enzymes, rather than
+# Bio.Restriction's full ~600-enzyme commercial batch -- that panel is
+# comprehensive enough to bury the handful of practically useful cutters
+# (unique/rare cutters, standard MCS enzymes) in noise for a several-kb
+# plasmid.
+COMMON_ENZYMES = [
+    "EcoRI", "BamHI", "HindIII", "XhoI", "XbaI", "SalI", "PstI", "SacI", "KpnI",
+    "SmaI", "NotI", "NcoI", "NdeI", "SpeI", "ApaI", "ClaI", "EcoRV", "NheI",
+    "BglII", "AvrII", "MluI", "NsiI", "PacI", "AscI", "FseI", "SbfI", "BsrGI",
+    "AflII", "ApaLI", "BstEII", "DraI", "EagI", "HpaI", "MfeI", "NruI", "PmeI",
+    "PvuI", "PvuII", "ScaI", "SphI", "SspI", "StuI", "XmaI",
+]
+
+DNA_LADDERS: dict[str, list[int]] = {
+    "50 bp Ladder": [1350, 1000, 900, 800, 700, 600, 500, 400, 300, 250, 200, 150, 100, 50],
+    "100 bp Ladder": [1517, 1200, 1000, 900, 800, 700, 600, 500, 400, 300, 200, 100],
+    "1 kb Ladder": [10000, 8000, 6000, 5000, 4000, 3000, 2000, 1500, 1000, 500],
+    "1 kb Plus Ladder": [10000, 8000, 6000, 5000, 4000, 3000, 2000, 1500, 1200, 1000, 850, 650, 500, 400, 300, 200, 100],
+}
+
+
+def is_circular_record(record: SeqRecord) -> bool:
+    """Whether a parsed record is annotated as circular (set by GenBank's
+    topology field; FASTA carries no such annotation and defaults to linear).
+    Plasmids are physically circular, which changes fragment counts for a
+    restriction digest -- N cut sites yield N fragments, not N+1."""
+    return str(record.annotations.get("topology", "linear")).lower() == "circular"
+
+
+def map_restriction_sites(
+    sequence: str, enzyme_names: list[str] | None = None, circular: bool = False
+) -> pd.DataFrame:
+    """Scan `sequence` against a panel of restriction enzymes (COMMON_ENZYMES
+    by default) and return a DataFrame of every enzyme that actually cuts it:
+    its recognition site, cut count, exact 1-based cut positions, and whether
+    it's a unique cutter (exactly one site -- the ones most useful for
+    linearizing a plasmid or dropping in a single site for cloning).
+
+    Enzymes with zero sites are omitted rather than listed with a 0, since a
+    "which enzymes cut this" table is what's actually useful here.
+    """
+    seq = Seq(_sanitize_sequence(sequence))
+    batch = RestrictionBatch(enzyme_names or COMMON_ENZYMES)
+    analysis = Analysis(batch, seq, linear=not circular)
+
+    rows = []
+    for enzyme, sites in analysis.full().items():
+        if not sites:
+            continue
+        rows.append({
+            "Enzyme": str(enzyme),
+            "Recognition Site": str(enzyme.site),
+            "Cut Sites": len(sites),
+            "Positions (bp)": ", ".join(str(s) for s in sites),
+            "Unique Cutter": len(sites) == 1,
+        })
+
+    df = pd.DataFrame(rows, columns=["Enzyme", "Recognition Site", "Cut Sites", "Positions (bp)", "Unique Cutter"])
+    if not df.empty:
+        df = df.sort_values(
+            ["Unique Cutter", "Cut Sites", "Enzyme"], ascending=[False, True, True]
+        ).reset_index(drop=True)
+    return df
+
+
+def digest_fragments(sequence: str, enzyme_names: list[str], circular: bool = False) -> list[int]:
+    """Simulate a multi-enzyme restriction digest, returning fragment lengths
+    (bp) in no particular order (a gel doesn't care about fragment order,
+    only size).
+
+    With no enzymes selected, or none of the selected enzymes cutting, the
+    "digest" is just the uncut sequence -- one fragment, full length. A
+    circular molecule cut at N sites yields N fragments (the cut linearizes
+    the loop rather than adding an end piece); a linear one yields N+1.
+    """
+    seq_len = len(_sanitize_sequence(sequence))
+    if not enzyme_names or seq_len == 0:
+        return [seq_len]
+
+    seq = Seq(_sanitize_sequence(sequence))
+    batch = RestrictionBatch(enzyme_names)
+    analysis = Analysis(batch, seq, linear=not circular)
+    sites = sorted({pos for positions in analysis.full().values() for pos in positions})
+    if not sites:
+        return [seq_len]
+
+    if circular:
+        return [
+            (sites[i + 1] if i + 1 < len(sites) else sites[0] + seq_len) - sites[i]
+            for i in range(len(sites))
+        ]
+    bounds = [0, *sites, seq_len]
+    return [bounds[i + 1] - bounds[i] for i in range(len(bounds) - 1)]
+
+
+_GEL_BAND_COLOR = "#39ff14"  # neon green, UV-transilluminator style
+
+# Explicit tick milestones for the gel's y-axis -- Plotly's automatic log-scale
+# ticks pack in a dense, overlapping run of minor-decade numbers (2, 3, 4, ...,
+# 20, 30, ...) that read as noise next to actual ladder sizes.
+_GEL_YAXIS_TICKVALS = [100, 250, 500, 1000, 1500, 2000, 3000, 4000, 5000, 6000, 8000, 10000]
+_GEL_YAXIS_TICKTEXT = ["100 bp", "250 bp", "500 bp", "1 kb", "1.5 kb", "2 kb", "3 kb", "4 kb", "5 kb", "6 kb", "8 kb", "10 kb"]
+
+
+def build_virtual_gel_figure(lanes: dict[str, list[int]]) -> go.Figure:
+    """Render a simulated agarose gel: one categorical x-axis 'lane' per
+    entry in `lanes` (insertion order, so the ladder should be passed first),
+    each fragment/band drawn as a thick horizontal marker on a reversed log
+    y-axis, glowing neon green against a dark background like a UV
+    transilluminator image.
+    """
+    fig = go.Figure()
+    lane_names = list(lanes.keys())
+
+    for lane in lane_names:
+        sizes = sorted(lanes[lane], reverse=True)
+        fig.add_trace(go.Scatter(
+            x=[lane] * len(sizes),
+            y=sizes,
+            mode="markers",
+            marker=dict(
+                symbol="line-ew",
+                size=34,
+                line=dict(width=6, color=_GEL_BAND_COLOR),
+                color=_GEL_BAND_COLOR,
+            ),
+            name=lane,
+            showlegend=False,
+            hovertext=[f"{s:,} bp" for s in sizes],
+            hoverinfo="text",
+        ))
+
+    fig.update_xaxes(
+        type="category",
+        categoryarray=lane_names,
+        title_text="Lane",
+        showgrid=False,
+        color="#cfcfcf",
+    )
+    fig.update_yaxes(
+        type="log",
+        autorange="reversed",
+        tickmode="array",
+        tickvals=_GEL_YAXIS_TICKVALS,
+        ticktext=_GEL_YAXIS_TICKTEXT,
+        minor=dict(showgrid=False, ticks=""),
+        title_text="Fragment size (bp)",
+        gridcolor="#2a2a2a",
+        color="#cfcfcf",
+    )
+    fig.update_layout(
+        plot_bgcolor="#0a0a0a",
+        paper_bgcolor="#0a0a0a",
+        font=dict(color="#e0e0e0", family="system-ui, -apple-system, 'Segoe UI', sans-serif"),
+        height=520,
+        margin=dict(l=60, r=20, t=40, b=60),
+    )
+    return fig
