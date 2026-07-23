@@ -118,7 +118,7 @@ _SEQUENCE_FILE_TYPES = [g.split(".")[-1] for g in analyzer.SEQUENCE_FILE_GLOBS]
 _IMAGE_FILE_EXTENSIONS = {"png", "jpg", "jpeg"}
 
 
-def _sort_query_uploads(uploaded_files) -> tuple[list, list]:
+def _sort_sequence_uploads(uploaded_files) -> tuple[list, list]:
     """Split a raw Plasmidsaurus folder upload into sequence files and gel images.
 
     Plasmidsaurus result folders bundle undigested gel simulation images
@@ -147,8 +147,10 @@ oligo_sequence = ""
 if reference_input_method == "Upload Reference File":
     reference_files = st.file_uploader(
         "Reference sequence file(s) (known-good plasmid/gene FASTA/GenBank files) — "
-        "optional if a Gene of interest is set in the sidebar",
-        type=_SEQUENCE_FILE_TYPES,
+        "optional if a Gene of interest is set in the sidebar. A raw, unedited Plasmidsaurus "
+        "folder can be dropped here too -- non-sequence files (gel images, .DS_Store, etc.) "
+        "are ignored automatically.",
+        type=_SEQUENCE_FILE_TYPES + sorted(_IMAGE_FILE_EXTENSIONS),
         accept_multiple_files=True,
     )
 else:
@@ -159,7 +161,8 @@ else:
         help="Pasted freely -- spaces, line breaks, and stray position numbers are stripped automatically.",
     )
 
-reference_provided = bool(reference_files) or bool(oligo_name and oligo_sequence)
+reference_sequence_files, _ = _sort_sequence_uploads(reference_files or [])
+reference_provided = bool(reference_sequence_files) or bool(oligo_name and oligo_sequence)
 
 query_files = st.file_uploader(
     "Plasmidsaurus result file(s) (query FASTA/GenBank files -- a raw, unedited "
@@ -173,7 +176,7 @@ st.caption(
     "directly onto the drop zone isn't supported; drag its individual files instead."
 )
 
-query_sequence_files, query_image_files = _sort_query_uploads(query_files or [])
+query_sequence_files, query_image_files = _sort_sequence_uploads(query_files or [])
 
 # st.file_uploader has no public API for folder selection, but its compiled
 # frontend already has an internal `acceptDirectory` prop that isn't wired up
@@ -231,13 +234,21 @@ def _load_records_from_uploads(uploaded_files, label: str) -> list[analyzer.SeqR
 
     Streamlit Cloud has no local filesystem for a folder path to point at,
     so files come in as in-memory UploadedFile objects instead of paths.
+
+    Callers pre-filter to recognized sequence extensions via
+    _sort_sequence_uploads, but that's a filename-only check -- it can't
+    guarantee the *contents* are well-formed (e.g. a mislabeled or
+    corrupted file). Biopython's parsers don't consistently raise
+    ValueError for malformed input, so this catches any Exception rather
+    than risk one bad file taking down the whole app for every query/
+    reference in the batch.
     """
     records = []
     for uploaded_file in uploaded_files:
         try:
             records.extend(analyzer.parse_records_from_upload(uploaded_file))
-        except ValueError as exc:
-            st.error(f"{label} — {uploaded_file.name}: {exc}")
+        except Exception as exc:
+            st.error(f"{label} — {uploaded_file.name}: couldn't be parsed ({exc}).")
     return records
 
 
@@ -245,7 +256,7 @@ if run_clicked and reference_provided:
     progress_bar = st.progress(0.0, text="Starting analysis...")
 
     if reference_input_method == "Upload Reference File":
-        references = _load_records_from_uploads(reference_files, "Reference files")
+        references = _load_records_from_uploads(reference_sequence_files, "Reference files")
     else:
         try:
             references = [analyzer.build_seqrecord_from_pasted_sequence(oligo_name, oligo_sequence)]
