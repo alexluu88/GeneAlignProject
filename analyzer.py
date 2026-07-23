@@ -119,7 +119,7 @@ class QueryOutcome:
     recommend_clones aggregates across all queries in a run."""
     query_id: str
     reference_id: str
-    status: str  # "PASS", "GENE_FOUND", or "FLAGGED"
+    status: str  # "PASS", "GENE_FOUND", or "FAIL"
     identity_pct: float
 
 
@@ -389,25 +389,57 @@ def classify_match(
     identity_threshold: float,
     coverage_threshold: float,
 ) -> str:
-    """Classify a best-match result as "PASS", "GENE_FOUND", or "FLAGGED".
+    """Classify a best-match result as "PASS", "GENE_FOUND", or "FAIL".
 
     PASS: the reference matches across (almost) the whole query.
     GENE_FOUND: the reference matches at high identity along its own full
         length (e.g. a gene/insert), but covers only part of the query,
         meaning the rest of the query (e.g. vector backbone) differs.
-    FLAGGED: neither the query nor the reference is well covered — no
-        confident match.
+    FAIL: neither the query nor the reference is well covered — no
+        confident match. Includes the case of a completely unrelated
+        sequence, where the aligner still forces *some* local alignment
+        (Smith-Waterman always returns its best-scoring region even when
+        every candidate is bad) -- below-threshold identity/coverage here
+        means that alignment isn't a real biological match, so callers must
+        not run mutation-counting against it. See build_no_match_message.
     """
     if result.identity_pct < identity_threshold:
-        return "FLAGGED"
+        return "FAIL"
     if result.query_coverage_pct >= coverage_threshold:
         return "PASS"
     if result.reference_coverage_pct >= coverage_threshold:
         return "GENE_FOUND"
-    return "FLAGGED"
+    return "FAIL"
 
 
-_STATUS_RANK = {"PASS": 0, "GENE_FOUND": 1, "FLAGGED": 2}
+def build_no_match_message(
+    result: AlignmentResult,
+    identity_threshold: float,
+    coverage_threshold: float,
+) -> str:
+    """Ready-to-display explanation for a FAIL-classified result.
+
+    Names whichever threshold it actually fell short of -- identity is
+    checked first since classify_match short-circuits on it, so a FAIL
+    caused by low identity should never be reported as a coverage problem.
+    Callers must show this instead of running mutation-counting on what's
+    typically just a forced alignment against an unrelated sequence.
+    """
+    if result.identity_pct < identity_threshold:
+        return (
+            f"No confident match found. The sequence identity "
+            f"({result.identity_pct:.1f}%) falls below the required threshold "
+            f"({identity_threshold:.0f}%)."
+        )
+    return (
+        "No confident match found. Neither the query coverage "
+        f"({result.query_coverage_pct:.1f}%) nor the reference coverage "
+        f"({result.reference_coverage_pct:.1f}%) reaches the required coverage "
+        f"threshold ({coverage_threshold:.0f}%)."
+    )
+
+
+_STATUS_RANK = {"PASS": 0, "GENE_FOUND": 1, "FAIL": 2}
 
 
 def pick_best_match(

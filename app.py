@@ -10,6 +10,7 @@ no local filesystem access.
 from __future__ import annotations
 
 import time
+from pathlib import Path
 
 import pandas as pd
 import streamlit as st
@@ -114,6 +115,26 @@ with st.sidebar:
 # ---------------------------------------------------------------------------
 
 _SEQUENCE_FILE_TYPES = [g.split(".")[-1] for g in analyzer.SEQUENCE_FILE_GLOBS]
+_IMAGE_FILE_EXTENSIONS = {"png", "jpg", "jpeg"}
+
+
+def _sort_query_uploads(uploaded_files) -> tuple[list, list]:
+    """Split a raw Plasmidsaurus folder upload into sequence files and gel images.
+
+    Plasmidsaurus result folders bundle undigested gel simulation images
+    alongside the actual sequence files (and occasionally OS cruft like
+    .DS_Store); only the two recognized kinds are kept, everything else is
+    silently dropped rather than passed to the analyzer or displayed.
+    """
+    sequence_files = []
+    image_files = []
+    for uploaded_file in uploaded_files:
+        ext = Path(uploaded_file.name).suffix.lstrip(".").lower()
+        if ext in _SEQUENCE_FILE_TYPES:
+            sequence_files.append(uploaded_file)
+        elif ext in _IMAGE_FILE_EXTENSIONS:
+            image_files.append(uploaded_file)
+    return sequence_files, image_files
 
 reference_input_method = st.radio(
     "Reference input method",
@@ -141,8 +162,9 @@ else:
 reference_provided = bool(reference_files) or bool(oligo_name and oligo_sequence)
 
 query_files = st.file_uploader(
-    "Plasmidsaurus result file(s) (query FASTA/GenBank files)",
-    type=_SEQUENCE_FILE_TYPES,
+    "Plasmidsaurus result file(s) (query FASTA/GenBank files -- a raw, unedited "
+    "Plasmidsaurus folder's gel simulation images are also accepted and shown separately)",
+    type=_SEQUENCE_FILE_TYPES + sorted(_IMAGE_FILE_EXTENSIONS),
     accept_multiple_files=True,
 )
 st.caption(
@@ -150,6 +172,8 @@ st.caption(
     "FASTA/GenBank file inside it (recursively) is uploaded at once. Dragging a folder "
     "directly onto the drop zone isn't supported; drag its individual files instead."
 )
+
+query_sequence_files, query_image_files = _sort_query_uploads(query_files or [])
 
 # st.file_uploader has no public API for folder selection, but its compiled
 # frontend already has an internal `acceptDirectory` prop that isn't wired up
@@ -198,7 +222,7 @@ components.html(
 run_clicked = st.button(
     "Run analysis",
     type="primary",
-    disabled=not (query_files and (reference_provided or gene_name_filter)),
+    disabled=not (query_sequence_files and (reference_provided or gene_name_filter)),
 )
 
 
@@ -249,7 +273,7 @@ if run_clicked and reference_provided:
 
     # Load every query file up front so the total record count is known
     # before starting alignment -- needed to drive a determinate progress bar.
-    pending_queries = _load_records_from_uploads(query_files, "Query files")
+    pending_queries = _load_records_from_uploads(query_sequence_files, "Query files")
 
     analysis_results = []  # list of (query_record, results, unmatched_fragments)
     total = len(pending_queries)
@@ -299,7 +323,7 @@ elif run_clicked:
         st.error("Enter an Entrez email in the sidebar to look up the gene of interest on NCBI.")
         st.stop()
 
-    pending_queries = _load_records_from_uploads(query_files, "Query files")
+    pending_queries = _load_records_from_uploads(query_sequence_files, "Query files")
     if not pending_queries:
         st.warning("No valid sequences to analyze.")
         st.stop()
@@ -401,6 +425,12 @@ with st.sidebar:
         args=(restriction_expanded_keys,),
     )
 
+if query_image_files:
+    with st.expander("Original Plasmidsaurus Gel Simulation", expanded=False):
+        for image_file in query_image_files:
+            st.image(image_file, use_container_width=True)
+            st.caption(image_file.name)
+
 for query, results, unmatched_fragments in analysis_results:
     st.divider()
 
@@ -427,61 +457,72 @@ for query, results, unmatched_fragments in analysis_results:
     metric_cols[1].metric("Query Coverage", f"{best.query_coverage_pct:.1f}%")
     metric_cols[2].metric("Reference Coverage", f"{best.reference_coverage_pct:.1f}%")
 
-    raw_mutations = analyzer.find_mutations(best, max_report=1000)
     ref_record = next((r for r in comparison_refs if r.id == best.reference_id), None)
-    gene_scope = (
-        analyzer.find_gene_scope(best, ref_record, query, gene_name=gene_name_filter or None)
-        if ref_record is not None
-        else analyzer.GeneScope(intervals=[], source="none")
-    )
-    mutations = analyzer.scope_mutations_to_genes(raw_mutations, gene_scope)
-    truncation = analyzer.find_truncation(best)
 
-    summary_lines = []
-    if status == "PASS":
-        summary_lines.append(f"Matches **{best.reference_id}** across the full query.")
-    elif status == "GENE_FOUND":
-        summary_lines.append(
-            f"Gene found: **{best.reference_id}** matches at {best.identity_pct:.1f}% identity "
-            f"across {best.reference_coverage_pct:.1f}% of its own length, but only covers "
-            f"{best.query_coverage_pct:.1f}% of the query. The rest of the query (vector "
-            "backbone) differs from this reference — expected if this is a different construct "
-            "that shares this gene/insert."
-        )
+    # A FAIL result means the aligner forced its best-scoring local alignment
+    # against what's below-threshold on identity and/or coverage -- often a
+    # genuinely unrelated sequence. Counting "mutations" against that forced
+    # alignment produces thousands of meaningless entries and a summary that
+    # contradicts the STATUS: FAIL banner above it, so mutation-counting is
+    # skipped entirely rather than computed and then downplayed cosmetically.
+    if status == "FAIL":
+        gene_scope = analyzer.GeneScope(intervals=[], source="none")
+        mutations: list[analyzer.Mutation] = []
+        truncation = None
+        summary_lines = [analyzer.build_no_match_message(best, identity_threshold, coverage_threshold)]
     else:
-        summary_lines.append(f"No confident match found against **{best.reference_id}**.")
-
-    if gene_scope.source == "none":
-        gene_label = gene_name_filter or "the gene of interest"
-        summary_lines.append(
-            f"⚠️ Couldn't locate '{gene_label}' in either the reference or this query's "
-            "annotations, so mutation reporting is unfiltered (whole-reference differences). "
-            "This can mean the gene is entirely absent from this clone — not just mutated, but "
-            "undetectable even as a fragment — rather than a clean match."
+        raw_mutations = analyzer.find_mutations(best, max_report=1000)
+        gene_scope = (
+            analyzer.find_gene_scope(best, ref_record, query, gene_name=gene_name_filter or None)
+            if ref_record is not None
+            else analyzer.GeneScope(intervals=[], source="none")
         )
+        mutations = analyzer.scope_mutations_to_genes(raw_mutations, gene_scope)
+        truncation = analyzer.find_truncation(best)
 
-    if not mutations and not truncation:
-        label = gene_name_filter if gene_scope.source != "none" else best.reference_id
-        summary_lines.append(f"✅ **{label}** matches exactly, full length, no mutations detected.")
-    else:
-        if truncation:
-            pieces = []
-            if truncation.missing_start_bp:
-                pieces.append(f"{truncation.missing_start_bp} bp missing from the start")
-            if truncation.missing_end_bp:
-                pieces.append(f"{truncation.missing_end_bp} bp missing from the end")
+        summary_lines = []
+        if status == "PASS":
+            summary_lines.append(f"Matches **{best.reference_id}** across the full query.")
+        else:  # GENE_FOUND
             summary_lines.append(
-                f"✂️ **{best.reference_id}** looks cut off relative to the reference: "
-                + " and ".join(pieces) + "."
+                f"Gene found: **{best.reference_id}** matches at {best.identity_pct:.1f}% identity "
+                f"across {best.reference_coverage_pct:.1f}% of its own length, but only covers "
+                f"{best.query_coverage_pct:.1f}% of the query. The rest of the query (vector "
+                "backbone) differs from this reference — expected if this is a different construct "
+                "that shares this gene/insert."
             )
-        if mutations:
-            total_affected_bp = sum(m.length for m in mutations)
-            mutation_label = gene_name_filter if gene_scope.source != "none" else best.reference_id
+
+        if gene_scope.source == "none":
+            gene_label = gene_name_filter or "the gene of interest"
             summary_lines.append(
-                f"🧬 **{mutation_label}** matches, but with {len(mutations)} distinct mutation "
-                f"event(s) affecting {total_affected_bp} bp total relative to the reference "
-                "(see table below)."
+                f"⚠️ Couldn't locate '{gene_label}' in either the reference or this query's "
+                "annotations, so mutation reporting is unfiltered (whole-reference differences). "
+                "This can mean the gene is entirely absent from this clone — not just mutated, but "
+                "undetectable even as a fragment — rather than a clean match."
             )
+
+        if not mutations and not truncation:
+            label = gene_name_filter if gene_scope.source != "none" else best.reference_id
+            summary_lines.append(f"✅ **{label}** matches exactly, full length, no mutations detected.")
+        else:
+            if truncation:
+                pieces = []
+                if truncation.missing_start_bp:
+                    pieces.append(f"{truncation.missing_start_bp} bp missing from the start")
+                if truncation.missing_end_bp:
+                    pieces.append(f"{truncation.missing_end_bp} bp missing from the end")
+                summary_lines.append(
+                    f"✂️ **{best.reference_id}** looks cut off relative to the reference: "
+                    + " and ".join(pieces) + "."
+                )
+            if mutations:
+                total_affected_bp = sum(m.length for m in mutations)
+                mutation_label = gene_name_filter if gene_scope.source != "none" else best.reference_id
+                summary_lines.append(
+                    f"🧬 **{mutation_label}** matches, but with {len(mutations)} distinct mutation "
+                    f"event(s) affecting {total_affected_bp} bp total relative to the reference "
+                    "(see table below)."
+                )
 
     st.info("\n\n".join(summary_lines))
 
@@ -682,7 +723,7 @@ for query, results, unmatched_fragments in analysis_results:
                         st.error(f"NCBI query failed: {exc}")
                     else:
                         _render_gene_identifications(identifications)
-    elif status == "FLAGGED":
+    elif status == "FAIL":
         st.info("Below threshold, but no unmatched flanking region met the minimum fragment length.")
 
 if analysis_results and comparison_refs:
