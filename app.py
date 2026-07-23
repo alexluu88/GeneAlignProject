@@ -148,9 +148,13 @@ if reference_input_method == "Upload Reference File":
     reference_files = st.file_uploader(
         "Reference sequence file(s) (known-good plasmid/gene FASTA/GenBank files) — "
         "optional if a Gene of interest is set in the sidebar. A raw, unedited Plasmidsaurus "
-        "folder can be dropped here too -- non-sequence files (gel images, .DS_Store, etc.) "
-        "are ignored automatically.",
-        type=_SEQUENCE_FILE_TYPES + sorted(_IMAGE_FILE_EXTENSIONS),
+        "folder can be dropped here too -- non-sequence files (gel images, .txt notes, "
+        "DS_Store, etc.) are accepted and then ignored automatically.",
+        # No `type=` restriction: a raw folder-select mixes in gel images, .txt
+        # notes, .DS_Store, etc., and Streamlit's frontend would otherwise
+        # reject every one of those with a red error chip before Python ever
+        # sees them. Sorting into sequence/image/ignored is handled entirely
+        # by _sort_sequence_uploads below instead.
         accept_multiple_files=True,
     )
 else:
@@ -165,9 +169,10 @@ reference_sequence_files, _ = _sort_sequence_uploads(reference_files or [])
 reference_provided = bool(reference_sequence_files) or bool(oligo_name and oligo_sequence)
 
 query_files = st.file_uploader(
-    "Plasmidsaurus result file(s) (query FASTA/GenBank files -- a raw, unedited "
-    "Plasmidsaurus folder's gel simulation images are also accepted and shown separately)",
-    type=_SEQUENCE_FILE_TYPES + sorted(_IMAGE_FILE_EXTENSIONS),
+    "Plasmidsaurus result file(s) (query FASTA/GenBank files -- drop a raw, unedited "
+    "Plasmidsaurus folder here as-is; gel simulation images are shown separately below "
+    "and anything else, like .txt notes or DS_Store, is ignored)",
+    # No `type=` restriction -- see the comment on the reference uploader above.
     accept_multiple_files=True,
 )
 st.caption(
