@@ -400,11 +400,16 @@ comparison_refs = st.session_state.get("comparison_refs", [])
 # than passing found-enzyme sets around) essentially free.
 all_found_enzymes: set[str] = set()
 restriction_expanded_keys = []
-for gel_query, gel_results, _ in analysis_results:
+for gel_i, (gel_query, gel_results, _) in enumerate(analysis_results):
     gel_best = analyzer.pick_best_match(gel_results, identity_threshold, coverage_threshold)
     if gel_best is None:
         continue
-    restriction_expanded_keys.append(f"restriction_expanded_{gel_query.id}_{gel_best.reference_id}")
+    # gel_i mirrors the enumerate index used for the same key in the main
+    # results loop below -- both walk analysis_results in the same order
+    # within a single script run, so the indices line up and this list
+    # keeps pointing at the right per-result session-state entries even
+    # when two results happen to share a query id/reference id pair.
+    restriction_expanded_keys.append(f"restriction_expanded_{gel_i}_{gel_query.id}_{gel_best.reference_id}")
     all_found_enzymes |= set(analyzer.map_restriction_sites(
         str(gel_query.seq), circular=analyzer.is_circular_record(gel_query)
     )["Enzyme"])
@@ -447,7 +452,7 @@ if query_image_files:
             st.image(image_file, use_container_width=True)
             st.caption(image_file.name)
 
-for query, results, unmatched_fragments in analysis_results:
+for i, (query, results, unmatched_fragments) in enumerate(analysis_results):
     st.divider()
 
     if not results:
@@ -545,7 +550,7 @@ for query, results, unmatched_fragments in analysis_results:
     st.plotly_chart(
         analyzer.build_alignment_figure(query, best, gene_scope=gene_scope, mutations=mutations),
         use_container_width=True,
-        key=f"alignment_map_{query.id}_{best.reference_id}",
+        key=f"alignment_map_{i}_{query.id}_{best.reference_id}",
         config={"scrollZoom": True, "displaylogo": False},
     )
     st.caption(
@@ -574,7 +579,7 @@ for query, results, unmatched_fragments in analysis_results:
         if len(mutations) > len(shown):
             st.caption(f"...and {len(mutations) - len(shown)} more event(s) not shown.")
 
-    confirm_key = f"confirm_{query.id}_{best.reference_id}"
+    confirm_key = f"confirm_{i}_{query.id}_{best.reference_id}"
     if st.button(f"🔍 Verify {best.reference_id} via NCBI", key=confirm_key):
         if not entrez_email:
             st.error("Enter an Entrez email in the sidebar before querying NCBI.")
@@ -614,7 +619,7 @@ for query, results, unmatched_fragments in analysis_results:
             ]
         )
 
-    raw_alignment_expanded_key = f"raw_alignment_expanded_{query.id}_{best.reference_id}"
+    raw_alignment_expanded_key = f"raw_alignment_expanded_{i}_{query.id}_{best.reference_id}"
     with _sticky_expander("📄 Raw alignment text (best match)", raw_alignment_expanded_key):
         strand_note = (
             "Matched on the query's reverse complement strand (the insert is oriented "
@@ -626,7 +631,7 @@ for query, results, unmatched_fragments in analysis_results:
         st.caption(strand_note)
         only_mismatches = st.toggle(
             "Only show regions with mismatches",
-            key=f"only_mismatches_{query.id}_{best.reference_id}",
+            key=f"only_mismatches_{i}_{query.id}_{best.reference_id}",
             on_change=_mark_expanded,
             args=(raw_alignment_expanded_key,),
         )
@@ -641,7 +646,7 @@ for query, results, unmatched_fragments in analysis_results:
             frame_height = max(120, alignment_html.count("\n") * 22 + 80)
             components.html(alignment_html, height=frame_height, scrolling=False)
 
-    restriction_expanded_key = f"restriction_expanded_{query.id}_{best.reference_id}"
+    restriction_expanded_key = f"restriction_expanded_{i}_{query.id}_{best.reference_id}"
     with _sticky_expander("🧬 Restriction Analysis & Virtual Gel", restriction_expanded_key):
         st.caption(
             f"Cut sites from a panel of {len(analyzer.COMMON_ENZYMES)} common commercial "
@@ -655,7 +660,12 @@ for query, results, unmatched_fragments in analysis_results:
         if query_sites_df.empty:
             st.info("None of the panel's enzymes cut this sequence.")
         else:
-            st.dataframe(query_sites_df, use_container_width=True, hide_index=True)
+            st.dataframe(
+                query_sites_df,
+                use_container_width=True,
+                hide_index=True,
+                key=f"query_sites_{i}_{query.id}_{best.reference_id}",
+            )
 
         ref_sites_df = pd.DataFrame()
         if ref_record is not None:
@@ -666,7 +676,12 @@ for query, results, unmatched_fragments in analysis_results:
             if ref_sites_df.empty:
                 st.info("None of the panel's enzymes cut this sequence.")
             else:
-                st.dataframe(ref_sites_df, use_container_width=True, hide_index=True)
+                st.dataframe(
+                    ref_sites_df,
+                    use_container_width=True,
+                    hide_index=True,
+                    key=f"ref_sites_{i}_{query.id}_{best.reference_id}",
+                )
 
         if not selected_enzymes:
             st.info("Select at least one enzyme in the sidebar's Virtual Gel Configuration to simulate a digest.")
@@ -682,7 +697,7 @@ for query, results, unmatched_fragments in analysis_results:
             st.plotly_chart(
                 analyzer.build_virtual_gel_figure(lanes),
                 use_container_width=True,
-                key=f"gel_{query.id}_{best.reference_id}",
+                key=f"gel_{i}_{query.id}_{best.reference_id}",
             )
 
     if unmatched_fragments:
@@ -698,7 +713,7 @@ for query, results, unmatched_fragments in analysis_results:
             st.write(f"**{frag.id}** — {len(frag.seq)} bp")
             frag_cols = st.columns(2)
 
-            screen_key = f"screen_{query.id}_{frag.id}"
+            screen_key = f"screen_{i}_{query.id}_{frag.id}"
             if frag_cols[0].button("🔍 Screen for human genes via NCBI", key=screen_key):
                 if not entrez_email:
                     st.error("Enter an Entrez email in the sidebar before querying NCBI.")
@@ -726,7 +741,7 @@ for query, results, unmatched_fragments in analysis_results:
                                 ]
                             )
 
-            identify_key = f"identify_{query.id}_{frag.id}"
+            identify_key = f"identify_{i}_{query.id}_{frag.id}"
             if frag_cols[1].button("🔍 Identify via NCBI Gene database", key=identify_key):
                 if not entrez_email:
                     st.error("Enter an Entrez email in the sidebar before querying NCBI.")
