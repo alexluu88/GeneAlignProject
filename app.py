@@ -1,9 +1,10 @@
 """Streamlit app for QC-checking Plasmidsaurus sequencing results.
 
-Read Plasmidsaurus FASTA/GenBank files from a local folder, align them
-locally against reference sequences from another local folder, and
-optionally screen any unmatched regions against NCBI for human-derived
-contamination.
+Takes uploaded Plasmidsaurus FASTA/GenBank files, aligns them locally
+against uploaded (or pasted) reference sequences, and optionally screens
+any unmatched regions against NCBI for human-derived contamination. Built
+to run on Streamlit Cloud, so all file input is via st.file_uploader --
+no local filesystem access.
 """
 
 from __future__ import annotations
@@ -64,9 +65,8 @@ st.markdown(
 
 st.title("Plasmidsaurus Sequencing QC")
 st.caption(
-    "Point at local folders of Plasmidsaurus FASTA/GenBank results and reference "
-    "sequences, align them, and flag any unmatched regions for NCBI human-gene "
-    "screening."
+    "Upload Plasmidsaurus FASTA/GenBank result and reference files, align them, and "
+    "flag any unmatched regions for NCBI human-gene screening."
 )
 
 # ---------------------------------------------------------------------------
@@ -93,14 +93,14 @@ with st.sidebar:
         "Gene of interest",
         value="AGGF1",
         help=(
-            "With a reference folder: only differences overlapping a gene/CDS feature "
+            "With a reference provided: only differences overlapping a gene/CDS feature "
             "whose annotation label contains this name (from the reference or, failing "
             "that, the query) are reported as mutations. Leave blank to report "
             "differences against any annotated gene/CDS, or against the whole reference "
             "if none are annotated.\n\n"
-            "Without a reference folder: this gene's sequence is looked up on NCBI by "
-            "name and searched for directly in each query read (Reference-Free Gene "
-            "Search) -- requires an Entrez email below."
+            "Without a reference: this gene's sequence is looked up on NCBI by name and "
+            "searched for directly in each query read (Reference-Free Gene Search) -- "
+            "requires an Entrez email below."
         ),
     )
 
@@ -113,47 +113,122 @@ with st.sidebar:
 # Main: upload + run
 # ---------------------------------------------------------------------------
 
-reference_folder = st.text_input(
-    "Reference sequence folder path (known-good plasmid/gene FASTA/GenBank files) — "
-    "optional if a Gene of interest is set in the sidebar",
+_SEQUENCE_FILE_TYPES = [g.split(".")[-1] for g in analyzer.SEQUENCE_FILE_GLOBS]
+
+reference_input_method = st.radio(
+    "Reference input method",
+    ["Upload Reference File", "Paste Oligo/Sequence"],
+    horizontal=True,
 )
 
-query_folder = st.text_input(
-    "Plasmidsaurus result folder path (query FASTA/GenBank files)",
+oligo_name = ""
+oligo_sequence = ""
+if reference_input_method == "Upload Reference File":
+    reference_files = st.file_uploader(
+        "Reference sequence file(s) (known-good plasmid/gene FASTA/GenBank files) — "
+        "optional if a Gene of interest is set in the sidebar",
+        type=_SEQUENCE_FILE_TYPES,
+        accept_multiple_files=True,
+    )
+else:
+    reference_files = []
+    oligo_name = st.text_input("Oligo name")
+    oligo_sequence = st.text_area(
+        "DNA sequence",
+        help="Pasted freely -- spaces, line breaks, and stray position numbers are stripped automatically.",
+    )
+
+reference_provided = bool(reference_files) or bool(oligo_name and oligo_sequence)
+
+query_files = st.file_uploader(
+    "Plasmidsaurus result file(s) (query FASTA/GenBank files)",
+    type=_SEQUENCE_FILE_TYPES,
+    accept_multiple_files=True,
+)
+st.caption(
+    "Tip: clicking \"Browse files\" above lets you select an entire folder -- every "
+    "FASTA/GenBank file inside it (recursively) is uploaded at once. Dragging a folder "
+    "directly onto the drop zone isn't supported; drag its individual files instead."
+)
+
+# st.file_uploader has no public API for folder selection, but its compiled
+# frontend already has an internal `acceptDirectory` prop that isn't wired up
+# to anything from Python yet -- when set, it renders the underlying <input>
+# with the standard `webkitdirectory` attribute, which is what actually makes
+# a browser's file dialog let you pick a folder (and hand back every file
+# inside it). This sets that attribute directly on the input via its stable,
+# Streamlit-testing-owned `data-testid` (far less likely to change across
+# versions than emotion-hashed class names), rather than waiting for a
+# Python-level parameter that doesn't exist yet.
+#
+# Only the "Browse files" click path is affected -- Streamlit's drag-and-drop
+# handling is separate and still expects individual files. Re-scans on an
+# interval (rather than patching once) because Streamlit can remount this
+# input on a rerun, which would otherwise silently drop the attribute; the
+# whole thing is wrapped in try/catch so an unrelated future frontend change
+# just falls back to normal multi-file selection instead of breaking.
+components.html(
+    """
+    <script>
+    (function () {
+        function patchDirectoryInputs() {
+            try {
+                const inputs = window.parent.document.querySelectorAll(
+                    'input[data-testid="stFileUploaderDropzoneInput"]:not([data-dir-patch-applied])'
+                );
+                inputs.forEach((input) => {
+                    input.setAttribute("webkitdirectory", "");
+                    input.setAttribute("directory", "");
+                    input.setAttribute("mozdirectory", "");
+                    input.setAttribute("data-dir-patch-applied", "1");
+                });
+            } catch (err) {
+                // Streamlit's internal markup changed or isn't ready yet --
+                // fail silently and fall back to normal file selection.
+            }
+        }
+        const interval = setInterval(patchDirectoryInputs, 500);
+        setTimeout(() => clearInterval(interval), 3600000);
+    })();
+    </script>
+    """,
+    height=0,
 )
 
 run_clicked = st.button(
     "Run analysis",
     type="primary",
-    disabled=not (query_folder and (reference_folder or gene_name_filter)),
+    disabled=not (query_files and (reference_provided or gene_name_filter)),
 )
 
 
-def _load_records_from_folder(folder_path: str, label: str) -> list[analyzer.SeqRecord]:
-    """Load all sequence records from a local folder, surfacing problems in the UI."""
-    try:
-        paths = analyzer.find_sequence_files(folder_path)
-    except ValueError as exc:
-        st.error(f"{label}: {exc}")
-        return []
+def _load_records_from_uploads(uploaded_files, label: str) -> list[analyzer.SeqRecord]:
+    """Parse all uploaded FASTA/GenBank files, surfacing problems in the UI.
 
-    if not paths:
-        st.warning(f"{label}: no FASTA/GenBank files found in {folder_path}")
-        return []
-
+    Streamlit Cloud has no local filesystem for a folder path to point at,
+    so files come in as in-memory UploadedFile objects instead of paths.
+    """
     records = []
-    for path in paths:
+    for uploaded_file in uploaded_files:
         try:
-            records.extend(analyzer.parse_records_from_path(path))
+            records.extend(analyzer.parse_records_from_upload(uploaded_file))
         except ValueError as exc:
-            st.error(f"{path.name}: {exc}")
+            st.error(f"{label} — {uploaded_file.name}: {exc}")
     return records
 
 
-if run_clicked and reference_folder:
+if run_clicked and reference_provided:
     progress_bar = st.progress(0.0, text="Starting analysis...")
 
-    references = _load_records_from_folder(reference_folder, "Reference folder")
+    if reference_input_method == "Upload Reference File":
+        references = _load_records_from_uploads(reference_files, "Reference files")
+    else:
+        try:
+            references = [analyzer.build_seqrecord_from_pasted_sequence(oligo_name, oligo_sequence)]
+        except ValueError as exc:
+            progress_bar.empty()
+            st.error(f"Pasted reference: {exc}")
+            st.stop()
 
     if not references:
         progress_bar.empty()
@@ -174,7 +249,7 @@ if run_clicked and reference_folder:
 
     # Load every query file up front so the total record count is known
     # before starting alignment -- needed to drive a determinate progress bar.
-    pending_queries = _load_records_from_folder(query_folder, "Query folder")
+    pending_queries = _load_records_from_uploads(query_files, "Query files")
 
     analysis_results = []  # list of (query_record, results, unmatched_fragments)
     total = len(pending_queries)
@@ -217,14 +292,14 @@ if run_clicked and reference_folder:
     st.session_state["reference_free_results"] = []
 
 elif run_clicked:
-    # No reference folder, but the button is only enabled here because a
+    # No reference provided, but the button is only enabled here because a
     # Gene of interest was set -- resolve its sequence from NCBI by name and
     # search for it directly in the reads instead of aligning to a reference.
     if not entrez_email:
         st.error("Enter an Entrez email in the sidebar to look up the gene of interest on NCBI.")
         st.stop()
 
-    pending_queries = _load_records_from_folder(query_folder, "Query folder")
+    pending_queries = _load_records_from_uploads(query_files, "Query files")
     if not pending_queries:
         st.warning("No valid sequences to analyze.")
         st.stop()
@@ -276,6 +351,55 @@ if reference_free_results:
 
 analysis_results = st.session_state.get("analysis_results", [])
 comparison_refs = st.session_state.get("comparison_refs", [])
+
+# Global virtual gel configuration -- depends on analysis_results (to scope
+# the enzyme dropdown to what's actually found in this run), so it's built
+# here rather than up with the rest of the sidebar, but still renders inside
+# the sidebar. Configured once for the whole run instead of once per result,
+# and cached map_restriction_sites calls make repeating them here (rather
+# than passing found-enzyme sets around) essentially free.
+all_found_enzymes: set[str] = set()
+restriction_expanded_keys = []
+for gel_query, gel_results, _ in analysis_results:
+    gel_best = analyzer.pick_best_match(gel_results, identity_threshold, coverage_threshold)
+    if gel_best is None:
+        continue
+    restriction_expanded_keys.append(f"restriction_expanded_{gel_query.id}_{gel_best.reference_id}")
+    all_found_enzymes |= set(analyzer.map_restriction_sites(
+        str(gel_query.seq), circular=analyzer.is_circular_record(gel_query)
+    )["Enzyme"])
+    gel_ref_record = next((r for r in comparison_refs if r.id == gel_best.reference_id), None)
+    if gel_ref_record is not None:
+        all_found_enzymes |= set(analyzer.map_restriction_sites(
+            str(gel_ref_record.seq), circular=analyzer.is_circular_record(gel_ref_record)
+        )["Enzyme"])
+found_enzymes = sorted(all_found_enzymes)
+
+
+def _mark_all_expanded(state_keys: list[str]) -> None:
+    for state_key in state_keys:
+        st.session_state[state_key] = True
+
+
+with st.sidebar:
+    st.header("Virtual Gel Configuration")
+    selected_enzymes = st.multiselect(
+        "Enzymes for virtual digest",
+        options=found_enzymes,
+        default=found_enzymes[:1] if found_enzymes else [],
+        help=(
+            "Populated from the enzymes found across this run's queries/references that "
+            "actually cut them. Applies to every result below."
+        ),
+        on_change=_mark_all_expanded,
+        args=(restriction_expanded_keys,),
+    )
+    ladder_name = st.selectbox(
+        "DNA ladder",
+        options=list(analyzer.DNA_LADDERS.keys()),
+        on_change=_mark_all_expanded,
+        args=(restriction_expanded_keys,),
+    )
 
 for query, results, unmatched_fragments in analysis_results:
     st.divider()
@@ -487,30 +611,8 @@ for query, results, unmatched_fragments in analysis_results:
             else:
                 st.dataframe(ref_sites_df, use_container_width=True, hide_index=True)
 
-        found_enzymes = sorted(
-            set(query_sites_df["Enzyme"]) | set(ref_sites_df["Enzyme"])
-        ) if not query_sites_df.empty or not ref_sites_df.empty else []
-
-        digest_key_suffix = f"{query.id}_{best.reference_id}"
-        selected_enzymes = st.multiselect(
-            "Enzymes for virtual digest",
-            options=found_enzymes,
-            default=found_enzymes[:1] if found_enzymes else [],
-            help="Populated from the enzymes found above that actually cut the query and/or reference.",
-            key=f"digest_enzymes_{digest_key_suffix}",
-            on_change=_mark_expanded,
-            args=(restriction_expanded_key,),
-        )
-        ladder_name = st.selectbox(
-            "DNA ladder",
-            options=list(analyzer.DNA_LADDERS.keys()),
-            key=f"ladder_{digest_key_suffix}",
-            on_change=_mark_expanded,
-            args=(restriction_expanded_key,),
-        )
-
         if not selected_enzymes:
-            st.info("Select at least one enzyme above to simulate a digest.")
+            st.info("Select at least one enzyme in the sidebar's Virtual Gel Configuration to simulate a digest.")
         else:
             lanes = {ladder_name: analyzer.DNA_LADDERS[ladder_name]}
             if ref_record is not None:
@@ -523,7 +625,7 @@ for query, results, unmatched_fragments in analysis_results:
             st.plotly_chart(
                 analyzer.build_virtual_gel_figure(lanes),
                 use_container_width=True,
-                key=f"gel_{digest_key_suffix}",
+                key=f"gel_{query.id}_{best.reference_id}",
             )
 
     if unmatched_fragments:
@@ -608,6 +710,12 @@ if analysis_results and comparison_refs:
         query_outcomes, reference_ids=[r.id for r in comparison_refs]
     )
     st.dataframe(recommended_clones_df, use_container_width=True, hide_index=True)
+    st.download_button(
+        "Download summary as CSV",
+        data=recommended_clones_df.to_csv(index=False).encode("utf-8"),
+        file_name="clone_summary.csv",
+        mime="text/csv",
+    )
 
 # The alignment map's x-axis is in bp, so zooming in past a few bp is
 # meaningless -- unbounded scroll/box zoom eventually lands on a fractional

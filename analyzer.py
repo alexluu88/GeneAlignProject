@@ -3,16 +3,22 @@
 Handles FASTA/GenBank parsing, local pairwise alignment against a folder of
 reference sequences, and screening of unmatched regions against NCBI for
 human-derived contamination.
+
+Depends on Streamlit only for @st.cache_data on the heavy alignment/
+restriction-mapping functions -- everything else here stays plain Python so
+it's still usable/testable outside of a running app.
 """
 
 from __future__ import annotations
 
 import re
 from dataclasses import dataclass
+from io import StringIO
 from pathlib import Path
 
 import pandas as pd
 import plotly.graph_objects as go
+import streamlit as st
 from Bio import Entrez, SeqIO
 from Bio.Align import Alignment, PairwiseAligner, substitution_matrices
 from Bio.Blast import NCBIWWW, NCBIXML
@@ -159,16 +165,60 @@ def find_sequence_files(folder: str | Path) -> list[Path]:
     return sorted(paths)
 
 
+def _sequence_format_for_suffix(suffix: str) -> str:
+    return "genbank" if suffix.lower() in (".gb", ".gbk", ".genbank") else "fasta"
+
+
+def _parse_records(handle, fmt: str, source_name: str) -> list[SeqRecord]:
+    records = list(SeqIO.parse(handle, fmt))
+    if not records:
+        raise ValueError(f"No sequences found in {source_name} (parsed as {fmt}).")
+    return records
+
+
 def parse_records_from_path(path: str | Path) -> list[SeqRecord]:
     """Parse a FASTA or GenBank file on disk into SeqRecords."""
     path = Path(path)
-    suffix = path.suffix.lower()
-    fmt = "genbank" if suffix in (".gb", ".gbk", ".genbank") else "fasta"
+    return _parse_records(str(path), _sequence_format_for_suffix(path.suffix), path.name)
 
-    records = list(SeqIO.parse(str(path), fmt))
-    if not records:
-        raise ValueError(f"No sequences found in {path.name} (parsed as {fmt}).")
-    return records
+
+def parse_records_from_upload(uploaded_file) -> list[SeqRecord]:
+    """Parse a FASTA or GenBank file straight out of an in-memory upload
+    (e.g. Streamlit's UploadedFile) rather than a path on disk.
+
+    Streamlit Cloud has no local filesystem for a folder-path input to point
+    at, so every reference/query file has to be read directly from the
+    browser upload's bytes instead -- wrapped in a StringIO so SeqIO.parse
+    sees the same kind of text handle it would get from an open() call.
+    """
+    name = getattr(uploaded_file, "name", "uploaded_file")
+    raw = uploaded_file.getvalue()
+    text = raw.decode("utf-8") if isinstance(raw, bytes) else raw
+    fmt = _sequence_format_for_suffix(Path(name).suffix)
+    return _parse_records(StringIO(text), fmt, name)
+
+
+def build_seqrecord_from_pasted_sequence(name: str, sequence: str) -> SeqRecord:
+    """Turn a user-pasted oligo name + raw sequence into a SeqRecord, so a
+    manually-pasted reference can be handed to the same alignment/plotting
+    pipeline as anything parsed from a physical FASTA/GenBank file.
+
+    Cleaning reuses _sanitize_sequence -- the same whitespace/newline/stray-
+    digit stripping applied to every other sequence in this module, e.g. for
+    position numbers pasted in from a sequence viewer -- so a pasted
+    reference isn't held to a stricter standard than an uploaded one.
+    Raises ValueError on a blank name or a sequence with no letters left
+    after cleaning.
+    """
+    clean_name = name.strip()
+    if not clean_name:
+        raise ValueError("Oligo name is required.")
+
+    clean_seq = _sanitize_sequence(sequence)
+    if not clean_seq:
+        raise ValueError("Pasted sequence is empty (or has no letters left after cleaning).")
+
+    return SeqRecord(Seq(clean_seq), id=clean_name, name=clean_name, description=clean_name)
 
 
 GENE_FEATURE_TYPES = ("gene", "CDS")
@@ -313,13 +363,23 @@ def align_pair(query: SeqRecord, reference: SeqRecord, aligner: PairwiseAligner)
     )
 
 
+@st.cache_data(show_spinner=False, hash_funcs={SeqRecord: lambda r: (r.id, str(r.seq))})
 def compare_to_references(
     query: SeqRecord,
     references: list[SeqRecord],
-    aligner: PairwiseAligner,
+    _aligner: PairwiseAligner,
 ) -> list[AlignmentResult]:
-    """Align `query` locally against every reference, best score first."""
-    results = [align_pair(query, ref, aligner) for ref in references]
+    """Align `query` locally against every reference, best score first.
+
+    This is the expensive step (a full DP alignment per reference), so it's
+    cached on the actual sequence content of `query`/`references` -- a
+    SeqRecord isn't hashable by Streamlit's default hasher, hence the
+    `hash_funcs` override, and `_aligner`'s leading underscore excludes it
+    from hashing entirely (it's a fixed local/PairwiseAligner config with a
+    single construction site, so it can't vary the result for a given cache
+    key anyway, and Streamlit can't hash it).
+    """
+    results = [align_pair(query, ref, _aligner) for ref in references]
     results.sort(key=lambda r: r.score, reverse=True)
     return results
 
@@ -1522,6 +1582,7 @@ def is_circular_record(record: SeqRecord) -> bool:
     return str(record.annotations.get("topology", "linear")).lower() == "circular"
 
 
+@st.cache_data(show_spinner=False)
 def map_restriction_sites(
     sequence: str, enzyme_names: list[str] | None = None, circular: bool = False
 ) -> pd.DataFrame:
@@ -1533,6 +1594,13 @@ def map_restriction_sites(
 
     Enzymes with zero sites are omitted rather than listed with a 0, since a
     "which enzymes cut this" table is what's actually useful here.
+
+    Cached: this re-runs on every script rerun for every query/reference in
+    the results loop (any unrelated widget interaction elsewhere on the page
+    triggers a full rerun), not just when "Run analysis" is clicked, so
+    without caching it silently redoes the same ~40-enzyme scan over and
+    over. All args here are plain str/list[str]/bool, so no hash_funcs
+    override is needed.
     """
     seq = Seq(_sanitize_sequence(sequence))
     batch = RestrictionBatch(enzyme_names or COMMON_ENZYMES)
